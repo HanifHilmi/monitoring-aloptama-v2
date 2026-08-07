@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply bg-runway-dark;
+  }
+  body {
+    @apply bg-runway-dark text-slate-200;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply rounded-lg border border-runway-border bg-runway-panel p-4 shadow-lg;
+  }
+  .status-dot {
+    @apply inline-block h-2.5 w-2.5 rounded-full;
+  }
+}
