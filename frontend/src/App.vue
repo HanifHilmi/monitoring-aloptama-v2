@@ -8,6 +8,7 @@ const nav = [
   { to: '/runway/middle', label: 'Runway Middle' },
   { to: '/sla-ola', label: 'SLA / OLA' },
 ]
+</script>
 
 <template>
   <div class="min-h-screen">
@@ -15,6 +16,8 @@ const nav = [
       <div class="mx-auto flex max-w-7xl items-center gap-6 px-4 py-3">
         <RouterLink to="/" class="flex items-center gap-2 text-lg font-semibold text-white">
           <span class="inline-block h-3 w-3 rounded-sm bg-emerald-400" />
+          <span>AWOS Monitor</span>
+        </RouterLink>
         <nav class="flex flex-1 items-center gap-1">
           <RouterLink
             v-for="item in nav"
@@ -25,5 +28,12 @@ const nav = [
             :exact-active-class="item.exact ? 'bg-runway-panel text-white' : ''"
           >
             {{ item.label }}
+          </RouterLink>
+        </nav>
+      </div>
+    </header>
     <main class="mx-auto max-w-7xl px-4 py-6">
       <RouterView />
+    </main>
+  </div>
+</template>

@@ -40,6 +40,8 @@ onBeforeUnmount(() => {
   chart?.dispose()
   chart = null
 })
+</script>
 
 <template>
   <div ref="el" :style="{ height }" class="w-full" />
+</template>

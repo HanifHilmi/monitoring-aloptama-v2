@@ -76,25 +76,42 @@ onMounted(() => {
   timer.value = setInterval(loadOverview, 15_000)
 })
 onUnmounted(() => clearInterval(timer.value))
+</script>
 
 <template>
   <div class="space-y-6">
     <template v-if="site">
-
       <!-- Site header stats -->
       <div class="grid gap-4 md:grid-cols-4">
         <div class="panel">
+          <div class="text-xs text-slate-500">Site</div>
           <div class="mt-1 text-2xl font-semibold text-emerald-400">
+            {{ site.name }}
+          </div>
+        </div>
         <div class="panel">
+          <div class="text-xs text-slate-500">Code</div>
+          <div class="mt-1 text-2xl font-semibold text-sky-400">
+            {{ site.code }}
+          </div>
+        </div>
         <div class="panel">
+          <div class="text-xs text-slate-500">Last sample</div>
           <div class="mt-1 text-2xl font-semibold text-sky-400">
             {{ fmtTime(Math.max(...sensors.map((s) => new Date(s.last_sample_time || 0)))) }}
+          </div>
+        </div>
         <div class="panel">
+          <div class="text-xs text-slate-500">Online sensors</div>
           <div class="mt-1 text-2xl font-semibold text-white">
             {{ sensors.filter((s) => s.status === 'ok').length }}/{{ sensors.length }}
+          </div>
+        </div>
+      </div>
 
       <!-- Sensor grid (dynamic from master table - no repetitive coding) -->
       <section>
+        <h2 class="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-400">Sensors</h2>
         <div class="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
           <SensorCard
             v-for="sensor in sensors"
@@ -103,13 +120,31 @@ onUnmounted(() => clearInterval(timer.value))
             :site-slug="site.slug"
             @click="selectSensor(sensor)"
           />
+        </div>
+      </section>
 
       <!-- OLA timeline for selected sensor -->
       <section v-if="selectedSensor">
         <h2 class="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-400">
           OLA Timeline — {{ selectedSensor.code }} ({{ selectedSensor.name }}) · 30d
+        </h2>
         <div class="panel">
+          <div v-if="olaLoading" class="flex h-[160px] items-center justify-center text-xs text-slate-500">
+            Loading OLA events…
+          </div>
           <template v-else>
             <EChart v-if="olaChartOption" :option="olaChartOption" height="160px" />
             <div class="mt-2 flex justify-between text-xs text-slate-400">
-
+              <span>{{ olaTotals.events }} events</span>
+              <span>{{ olaTotals.open }} open</span>
+              <span>Downtime {{ fmtDuration(olaTotals.downtime) }}</span>
+            </div>
+          </template>
+        </div>
+      </section>
+    </template>
+    <div v-else class="flex h-40 items-center justify-center text-sm text-slate-500">
+      Loading site…
+    </div>
+  </div>
+</template>
