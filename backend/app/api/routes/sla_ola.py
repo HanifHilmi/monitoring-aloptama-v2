@@ -1,14 +1,14 @@
 """Availability endpoints (SLA / OLA + components).
 
 Semantics (per product definition):
-- CDP Uptime   = uptime % of each CDP node from availability / connectivity.
+- CDP Uptime   = uptime % of each CDP node from connectivity.
 - SLA          = (CDP1 uptime + CDP2 uptime) / 2.
 - DataAvail    = per-site availability of valid sensor data
                  (7 components per site; RWY04 ALS counts into RVR_ALS).
 - OLA          = (RWY04 DA + RWYMID DA + RWY22 DA) / 3.
 
-All queries use SQL GROUP BY so requests stay well under the proxy/cloudflare
-timeout even over 365-day ranges.
+All aggregates use raw SQL (COUNT(*) FILTER) so they compile correctly on
+asyncpg and stay well under the proxy timeout over 365-day ranges.
 """
 
 from __future__ import annotations
@@ -16,11 +16,11 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select, text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.models import CdpConnectivity, CdpNode, Site, Telemetry
+from app.models import CdpConnectivity, CdpNode, Site
 
 router = APIRouter(prefix="/sla-ola", tags=["sla-ola"])
 
@@ -36,19 +36,16 @@ def _range_start(range_key: str, now: datetime) -> datetime:
 
 
 async def _cdp_uptime(db: AsyncSession, node: CdpNode, start: datetime, end: datetime) -> dict:
-    """Single-row SQL aggregation per CDP node (fast over any range)."""
+    """Per-CDP uptime via raw COUNT FILTER SQL."""
     row = (
         await db.execute(
-            select(
-                func.count(CdpConnectivity.time).label("total"),
-                func.count(CdpConnectivity.time)
-                .filter(CdpConnectivity.reachable.is_(True))
-                .label("up"),
-            ).where(
-                CdpConnectivity.cdp_id == node.id,
-                CdpConnectivity.time >= start,
-                CdpConnectivity.time <= end,
-            )
+            text(
+                "SELECT COUNT(*) AS total, "
+                "COUNT(*) FILTER (WHERE reachable) AS up "
+                "FROM cdp_connectivity "
+                "WHERE cdp_id = :cid AND time >= :start AND time <= :end"
+            ),
+            {"cid": node.id, "start": start, "end": end},
         )
     ).one()
     total = row.total or 0
@@ -67,13 +64,12 @@ async def _cdp_uptime(db: AsyncSession, node: CdpNode, start: datetime, end: dat
 
 
 async def _site_data_availability(db: AsyncSession, site: Site, start: datetime, end: datetime) -> dict:
-    """Per-site Data Availability via one GROUP BY per site."""
+    """Per-site Data Availability via raw per-sensor COUNT FILTER SQL."""
     sensors = [s for s in site.sensors if s.is_enabled]
     if not sensors:
         return {"site_id": site.id, "slug": site.slug, "code": site.code, "name": site.name,
                 "data_availability_pct": 0.0, "components": []}
 
-    # RWY04: ALS merges into RVR_ALS -> exactly 7 components.
     components: dict[str, list[int]] = {}
     for s in sensors:
         comp = s.component or s.code
@@ -81,20 +77,17 @@ async def _site_data_availability(db: AsyncSession, site: Site, start: datetime,
 
     rows = (
         await db.execute(
-            select(
-                Telemetry.sensor_id,
-                func.count(Telemetry.time).label("total"),
-                func.count(Telemetry.time).filter(Telemetry.is_valid.is_(True)).label("valid"),
-            )
-            .where(
-                Telemetry.sensor_id.in_([s.id for s in sensors]),
-                Telemetry.time >= start,
-                Telemetry.time <= end,
-            )
-            .group_by(Telemetry.sensor_id)
+            text(
+                "SELECT sensor_id AS sid, COUNT(*) AS total, "
+                "COUNT(*) FILTER (WHERE is_valid) AS valid "
+                "FROM telemetry "
+                "WHERE sensor_id = ANY(:ids) AND time >= :start AND time <= :end "
+                "GROUP BY sensor_id"
+            ),
+            {"ids": [s.id for s in sensors], "start": start, "end": end},
         )
     ).all()
-    stats = {r.sensor_id: (r.total or 0, r.valid or 0) for r in rows}
+    stats = {r.sid: (r.total or 0, r.valid or 0) for r in rows}
 
     comp_rows = []
     overall_total = 0
@@ -154,7 +147,7 @@ async def get_history(
     span: str = Query("month", pattern="^(month|year|5year)$"),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """SLA/OLA history buckets via SQL GROUP BY on calendar day."""
+    """SLA/OLA history buckets via raw SQL GROUP BY on calendar day."""
     now = datetime.now(timezone.utc)
     if span == "year":
         start = now - timedelta(days=365)
@@ -163,30 +156,24 @@ async def get_history(
     else:
         start = now - timedelta(days=30)
 
-    day_expr = func.date_trunc("day", CdpConnectivity.time).label("day")
     cdp_rows = (
         await db.execute(
-            select(
-                day_expr,
-                func.count(CdpConnectivity.time)
-                .filter(CdpConnectivity.reachable.is_(True)).label("up"),
-                func.count(CdpConnectivity.time).label("total"),
-            )
-            .where(CdpConnectivity.time >= start)
-            .group_by(func.date_trunc("day", CdpConnectivity.time))
+            text(
+                "SELECT date_trunc('day', time) AS day, "
+                "COUNT(*) FILTER (WHERE reachable) AS up, COUNT(*) AS total "
+                "FROM cdp_connectivity WHERE time >= :start GROUP BY 1"
+            ),
+            {"start": start},
         )
     ).all()
-
-    tel_day = func.date_trunc("day", Telemetry.time).label("day")
     tel_rows = (
         await db.execute(
-            select(
-                tel_day,
-                func.count(Telemetry.time).filter(Telemetry.is_valid.is_(True)).label("valid"),
-                func.count(Telemetry.time).label("total"),
-            )
-            .where(Telemetry.time >= start)
-            .group_by(func.date_trunc("day", Telemetry.time))
+            text(
+                "SELECT date_trunc('day', time) AS day, "
+                "COUNT(*) FILTER (WHERE is_valid) AS valid, COUNT(*) AS total "
+                "FROM telemetry WHERE time >= :start GROUP BY 1"
+            ),
+            {"start": start},
         )
     ).all()
 
