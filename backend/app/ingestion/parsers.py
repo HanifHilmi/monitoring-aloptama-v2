@@ -1,13 +1,17 @@
-"""WIDN 1-minute log parser.
+"""WIDN 1-minute oneminute parser using FIXED CHARACTER POSITIONS.
 
-WIDN daily report (``091OneMinute.<YYYYMMDD>.dat``) with per-station
-(04/M/22) metric blocks. Sensor->metric semantics:
-  ATRH: TEMP DEWP RH        BARO: QNH        ANEM: WS WD WGS
-  PWX : PW (ONLY)           RVR : RVR VIS    ALS : ALS_INT D/N (RWY04)
-  CEL : LR1 SKY             RAIN: RA         SOLR: SOL      LIGH: LTX
-Visibility (VIS) belongs to the RVR sensor, never PWX. TEMP/DEWP/QNH are
-transmitted with a trailing digit (253 => 25.3 C, 10108 => 1010.8 hPa);
-`scale` adjusts the raw value.
+The real 091OneMinute.<date>.dat uses fixed-width columns (see the AWOS
+reference parser). Each data line is padded to 350 chars; fields are
+extracted by [start:end] character slices. The first 4 lines are the
+header. TEMP/DEWP/QNH are stored without a decimal point and divided by 10.
+
+Sensor -> (station, list of (metric, slice)):
+  RWY04 (station 04): ATRH TEMP/DEWP/RH, BARO QNH, ANEM WS/WD,
+                      RVR RVR/VIS/ALS/D-N, CEL LR1/SKY, PWX PW
+  RWYMID (station M): ATRH TEMP/DEWP/RH, BARO QNH, ANEM WS/WD,
+                      RAIN RA, SOLR SOL, LIGH LTX
+  RWY22 (station 22): ATRH TEMP/DEWP/RH, BARO QNH, ANEM WS/WD,
+                      RVR RVR/VIS, CEL LR1/SKY, PWX PW
 """
 
 from __future__ import annotations
@@ -18,7 +22,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-MISSING_TOKENS = {"///", "MMMM", "M", "N/A", ""}
+MISSING = {"///", "//", "MM", "M", "N/A", "---", ""}
+
+LINE_PAD = 350
 
 
 @dataclass
@@ -39,7 +45,7 @@ class ParsedRecord:
 
 def coerce_value(raw: str) -> Optional[float]:
     token = raw.strip()
-    if not token or token in MISSING_TOKENS:
+    if not token or token in MISSING:
         return None
     clean = token.replace(",", ".")
     try:
@@ -58,122 +64,78 @@ def parse_timestamp_from_filename(filename: str) -> Optional[datetime]:
     return None
 
 
-# Sensor -> WIDN symbol slots. VIS belongs to RVR, not PWX.
-SENSOR_METRICS = {
-    "ATRH": [
-        {"metric": "TEMP", "symbol": "TEMP", "scale": 0.1},
-        {"metric": "DEWP", "symbol": "DEWP", "scale": 0.1},
-        {"metric": "RH", "symbol": "RH"},
-    ],
-    "BARO": [{"metric": "QNH", "symbol": "QNH", "scale": 0.1}],
-    "ANEM": [
-        {"metric": "WS", "symbol": "WS"},
-        {"metric": "WD", "symbol": "WD"},
-        {"metric": "WGS", "symbol": "WGS"},
-    ],
-    "PWX": [
-        {"metric": "PW", "symbol": "PW"},
-    ],
-    "CEL": [
-        {"metric": "LR1", "symbol": "LR1"},
-        {"metric": "SKY", "symbol": "SKY"},
-    ],
-    "RVR": [
-        {"metric": "RVR", "symbol": "RVR"},
-        {"metric": "VIS", "symbol": "VIS"},
-    ],
-    "ALS": [
-        {"metric": "ALS_INT", "symbol": "ALS"},
-        {"metric": "D/N", "symbol": "D/N"},
-    ],
-    "RAIN": [{"metric": "RA", "symbol": "RA"}],
-    "SOLR": [{"metric": "SOL", "symbol": "SOL"}],
-    "LIGH": [{"metric": "LTX", "symbol": "LTX"}],
+# Fixed character slices per (sensor_code, station). start:end are indexes
+# into the padded line. Event/text fields have scale=None (kept as text).
+_SLICES: dict[tuple[str, str], list[tuple[str, int, int, Optional[float]]]] = {
+    # RWY 04
+    ("ATRH", "04"): [("TEMP", 79, 83, 0.1), ("DEWP", 84, 88, 0.1), ("RH", 89, 93, None)],
+    ("BARO", "04"): [("QNH", 124, 129, 0.1)],
+    ("ANEM", "04"): [("WS", 19, 23, None), ("WD", 24, 28, None)],
+    ("RVR", "04"): [("RVR", 176, 181, None), ("VIS", 170, 175, None),
+                    ("ALS_INT", 160, 165, None), ("D/N", 166, 169, None)],
+    ("CEL", "04"): [("LR1", 218, 222, None), ("SKY", 228, 257, None)],
+    ("PWX", "04"): [("PW", 306, 315, None)],
+    # MIDDLE (station M)
+    ("ATRH", "M"): [("TEMP", 94, 98, 0.1), ("DEWP", 99, 103, 0.1), ("RH", 104, 108, None)],
+    ("BARO", "M"): [("QNH", 130, 135, 0.1)],
+    ("ANEM", "M"): [("WS", 39, 43, None), ("WD", 44, 48, None)],
+    ("RAIN", "M"): [("RA", 294, 299, None)],
+    ("SOLR", "M"): [("SOL", 326, 331, None)],
+    ("LIGH", "M"): [("LTX", 332, 336, None)],
+    # RWY 22
+    ("ATRH", "22"): [("TEMP", 109, 113, 0.1), ("DEWP", 114, 118, 0.1), ("RH", 119, 123, None)],
+    ("BARO", "22"): [("QNH", 136, 141, 0.1)],
+    ("ANEM", "22"): [("WS", 59, 63, None), ("WD", 64, 68, None)],
+    ("RVR", "22"): [("RVR", 200, 205, None), ("VIS", 194, 199, None)],
+    ("CEL", "22"): [("LR1", 223, 227, None), ("SKY", 258, 287, None)],
+    ("PWX", "22"): [("PW", 316, 325, None)],
 }
 
 
-def _load_header(lines: list[str]) -> tuple[list[str], list[str]]:
-    symbol_map: list[str] = []
-    station_map: list[str] = []
-    for raw in lines:
-        stripped = raw.strip()
-        if not stripped:
-            continue
-        tokens = stripped.split()
-        if tokens[0] == "STN":
-            symbol_map = tokens[4:]
-        elif tokens[0] == "xxx":
-            station_map = tokens[1:]
-        if symbol_map and station_map:
-            break
-    return symbol_map, station_map
-
-
-def _column_for(symbol, station, symbol_map, station_map) -> Optional[int]:
-    if not symbol_map:
-        return None
-    for i, sym in enumerate(symbol_map):
-        if sym != symbol:
-            continue
-        stat = station_map[i] if i < len(station_map) else ""
-        if stat == station:
-            return i
-    return None
-
-
 def parse_one_minute_file(path, sensor_specs, default_ts=None) -> list[ParsedRecord]:
+    """Parse a daily 091OneMinute.<date>.dat by fixed char positions."""
     try:
         content = path.read_text(encoding="utf-8", errors="replace")
     except (OSError, UnicodeError):
         return []
     lines = content.splitlines()
-    symbol_map, station_map = _load_header(lines)
+    # Skip the 4 header lines (title, STN names, station map, units).
+    data_lines = lines[4:]
 
-    station_of: dict[str, str] = {}
-    specs_metrics: dict[str, list[dict]] = {}
-    for code, spec in sensor_specs.items():
-        station = spec.get("station", "04")
-        station_of[code] = station
-        metrics = SENSOR_METRICS.get(code, [])
-        if not metrics:
-            metrics = [{"metric": "value", "symbol": spec.get("symbol", "TEMP")}]
-        specs_metrics[code] = metrics
+    # sensor_specs: {code: {station, ...}}
+    station_of = {code: spec.get("station", "04") for code, spec in sensor_specs.items()}
 
     records: list[ParsedRecord] = []
-    for raw in lines:
-        line = raw.strip()
-        if not line:
+    for raw in data_lines:
+        line = raw.rstrip("\n")
+        if not line.strip():
             continue
-        tokens = line.split()
-        if len(tokens) < 5 or not re.match(r"^\d{8}$", tokens[1]):
+        padded = line.ljust(LINE_PAD, " ")
+        # Timestamp: Date cols[4:12] + Hour[13:15] + Minute[16:18]
+        date_s = padded[4:12].strip()
+        hour_s = padded[13:15].strip()
+        min_s = padded[16:18].strip()
+        if not (date_s and hour_s and min_s):
             continue
         try:
-            ts = datetime.strptime(
-                f"{tokens[1]} {tokens[2]} {tokens[3]}", "%Y%m%d %H %M"
-            ).replace(tzinfo=timezone.utc)
+            ts = datetime.strptime(f"{date_s} {hour_s} {min_s}", "%Y%m%d %H %M").replace(tzinfo=timezone.utc)
         except ValueError:
             continue
-        data_tokens = tokens[4:]
 
         rec = ParsedRecord(ts=ts)
-        for code, metrics in specs_metrics.items():
-            station = station_of[code]
-            for m in metrics:
-                idx = _column_for(m["symbol"], station, symbol_map, station_map)
-                if idx is None or idx >= len(data_tokens):
-                    rec.metrics.append(
-                        ParsedMetric(code, m["metric"], None, None, False, line)
-                    )
-                    continue
-                token = data_tokens[idx].strip()
+        for code, station in station_of.items():
+            spec = _SLICES.get((code, station))
+            if not spec:
+                continue
+            for metric, start, end, scale in spec:
+                token = padded[start:end].strip()
                 val = coerce_value(token)
-                scale = m.get("scale", 1.0)
-                if val is not None and scale != 1.0:
+                if scale is not None and val is not None:
                     val = round(val * scale, 6)
                 valid = val is not None
                 rec.metrics.append(
                     ParsedMetric(
-                        code, m["metric"], val,
+                        code, metric, val,
                         token if not valid else None, valid, line,
                     )
                 )

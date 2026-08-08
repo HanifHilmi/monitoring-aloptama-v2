@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.ingestion.parsers import (
-    SENSOR_METRICS,
     coerce_value,
     parse_one_minute_file,
     parse_site_batch,
@@ -15,9 +14,10 @@ from app.ingestion.parsers import (
 
 
 def specs(station: str = "04") -> dict:
+    codes = ["ATRH", "BARO", "ANEM", "PWX", "CEL", "RVR", "ALS", "RAIN", "SOLR", "LIGH"]
     return {
         code: {"sensor_id": i + 1, "station": station}
-        for i, code in enumerate(SENSOR_METRICS)
+        for i, code in enumerate(codes)
     }
 
 
@@ -35,12 +35,19 @@ def test_parse_widn_metrics(widn_file: Path) -> None:
     assert by_code[("BARO", "QNH")].value == 1010.8
     assert by_code[("ANEM", "WS")].value == 5.0
     assert by_code[("ANEM", "WD")].value == 165.0
-    assert by_code[("ANEM", "WGS")].is_valid is False
-    assert by_code[("CEL", "LR1")].value == 5.0
-    assert by_code[("ALS", "ALS_INT")].value == 1047.0
+    # WGS (wind gust) is not persisted as a chart metric — it feeds the
+    # wind-gust rectangle panel instead.
+    assert ("ANEM", "WGS") not in by_code
+    assert by_code[("CEL", "LR1")].value == 23.0
+    assert by_code[("CEL", "SKY")].text_value == "OVC024"
+    # ALS + D/N belong to the RVR component (RVR_ALS), not a separate ALS.
+    assert by_code[("RVR", "ALS_INT")].value == 1047.0
+    assert by_code[("RVR", "D/N")].text_value == "D"
     # VIS belongs to RVR, not PWX (product semantics).
     assert by_code[("RVR", "VIS")].value == 13459.0
+    assert by_code[("RVR", "RVR")].value == 13459.0
     assert ("PWX", "VIS") not in by_code
+    assert by_code[("PWX", "PW")].text_value == "RERA"
 
 
 def test_parse_widn_station22(widn_file: Path) -> None:
