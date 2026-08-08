@@ -56,6 +56,18 @@ const chartOption = computed(() => {
       rightName: 'RH %',
     })
   }
+  // ANEM: combine wind speed (kt, left) + wind direction (deg, right).
+  if (props.sensor.code === 'ANEM' && metrics.value.WD?.length) {
+    const wd = metrics.value.WD
+      .filter((s) => s.value !== null)
+      .map((s) => ({ time: s.time, value: s.value }))
+    return buildDualAxisOption({
+      left: pts,
+      right: wd,
+      leftName: 'WS kt',
+      rightName: 'WD deg',
+    })
+  }
   if (props.sensor.code === 'CEL') {
     // dot graph: don't include zero values
     const dots = pts.filter((p) => p.value !== 0)
@@ -132,7 +144,6 @@ onUnmounted(() => clearInterval(timer.value))
       No wind gusts in this range
     </div>
 
-    <Transition name="fade" mode="out-in">
     <div v-if="loading && !Object.keys(metrics.value).length" class="flex h-[160px] items-center justify-center text-xs text-slate-500">
       Loading…
     </div>
@@ -152,6 +163,5 @@ onUnmounted(() => clearInterval(timer.value))
     <div v-else class="flex h-[160px] items-center justify-center text-xs text-slate-500">
       No telemetry in this range
     </div>
-    </Transition>
   </div>
 </template>

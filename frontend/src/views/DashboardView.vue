@@ -53,7 +53,7 @@ onUnmounted(() => clearInterval(timer.value))
   <div class="space-y-6">
     <!-- Row 1: SLA & OLA percentages -->
     <div class="flex items-center justify-between">
-      <h1 class="text-lg font-semibold text-slate-200">System Availability</h1>
+      <h1 class="text-lg font-semibold text-slate-200">SLA/OLA</h1>
       <select v-model="range" @change="load" class="rounded border border-runway-border bg-runway-panel px-2 py-1 text-xs text-slate-200">
         <option value="today">Today</option>
         <option value="week">This week</option>

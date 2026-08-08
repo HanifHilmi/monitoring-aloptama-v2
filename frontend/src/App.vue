@@ -8,7 +8,6 @@ const nav = [
   { to: '/runway/04', label: 'Runway 04' },
   { to: '/runway/22', label: 'Runway 22' },
   { to: '/runway/middle', label: 'Runway Middle' },
-  { to: '/sla-ola', label: 'SLA / OLA' },
 ]
 
 // ---- UTC / WIB toggle ----

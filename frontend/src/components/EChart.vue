@@ -14,7 +14,9 @@ let observer = null
 
 function render() {
   if (!chart) return
-  chart.setOption(props.option, { notMerge: true })
+  // notMerge:false -> merge new data in-place so the graph just appends
+  // the new points instead of replacing the chart (no card blink/fade).
+  chart.setOption(props.option, { notMerge: false })
 }
 
 function resize() {
