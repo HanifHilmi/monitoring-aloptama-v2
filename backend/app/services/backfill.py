@@ -176,6 +176,10 @@ async def _ingest_minute(
                 entry["position"] = s.position
             if s.fallback_slice:
                 entry["fallback_slice"] = s.fallback_slice
+            if s.symbol:
+                entry["symbol"] = s.symbol
+            if s.station:
+                entry["station"] = s.station
             specs[s.code] = entry
 
         # Try each site file prefix

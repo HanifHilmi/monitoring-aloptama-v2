@@ -66,6 +66,8 @@ class Sensor(Base):
     max_valid: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     position: Mapped[int] = mapped_column(Integer, default=0)
     fallback_slice: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    symbol: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    station: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))

@@ -169,26 +169,56 @@ class CdpReader:
     def resolve_site_file(self, site_prefix: str, ts: datetime) -> Optional[Path]:
         """Resolve the 1-minute log file path for a site on the active node.
 
-        Expected layout:
-            <mount_path>/oneminute/<site_prefix><YYYYMMDDHHMM>.OneMinute.dat
-        """
-        active = self.state.active_node()
-        if active is None:
-            return None
-        ts_str = ts.strftime("%Y%m%d%H%M")
-        return Path(active.mount_path) / "oneminute" / f"{site_prefix}{ts_str}.OneMinute.dat"
-
-    def resolve_raw_sensor_file(self, site_prefix: str, ts: datetime) -> Optional[Path]:
-        """Resolve the raw DCP file path for a site on the active node.
-
-        Expected layout:
-            <mount_path>/sensor/<site_prefix><YYYYMMDD>.dat
+        Real layout observed on CDP1/CDP2:
+            <mount_path>/oneminute/091OneMinute.<YYYYMMDD>.dat
+        The file is *daily*; every data row carries its own minute.
+        `site_prefix` is the station prefix (e.g. '091'); for newer CDP
+        versions files may be per-site, in which case we fall back to the
+        common station file.
         """
         active = self.state.active_node()
         if active is None:
             return None
         ts_str = ts.strftime("%Y%m%d")
-        return Path(active.mount_path) / "sensor" / f"{site_prefix}{ts_str}.dat"
+        oneminute_dir = Path(active.mount_path) / "oneminute"
+        # The station's daily file (091OneMinute.<date>.dat) holds all site
+        # rows (04/22/M in columns). Try the site prefix, then any file
+        # matching *OneMinute.<date>.dat (the universal WIDN station file).
+        candidates = [
+            oneminute_dir / f"{site_prefix}OneMinute.{ts_str}.dat",
+            oneminute_dir / f"{site_prefix}{ts_str}.OneMinute.dat",
+        ]
+        for path in candidates:
+            if path.exists():
+                return path
+        # Universal station file: e.g. 091OneMinute.20260101.dat
+        if oneminute_dir.is_dir():
+            matches = [p for p in oneminute_dir.glob(f"*OneMinute.{ts_str}.dat")]
+            if matches:
+                return matches[0]
+        # Return the primary expected path anyway; caller falls back to raw.
+        return candidates[0]
+
+    def resolve_raw_sensor_file(self, site_prefix: str, ts: datetime) -> Optional[Path]:
+        """Resolve the raw DCP file path for a site on the active node.
+
+        Real layout observed on CDP1/CDP2:
+            <mount_path>/sensor/RWYA.DCP.<YYYYMMDDHH>.dat
+        """
+        active = self.state.active_node()
+        if active is None:
+            return None
+        ts_str = ts.strftime("%Y%m%d%H")
+        sensor_dir = Path(active.mount_path) / "sensor"
+        candidates = [
+            sensor_dir / f"RWYA.DCP.{ts_str}.dat",
+            sensor_dir / f"{site_prefix}.DCP.{ts_str}.dat",
+            sensor_dir / f"{site_prefix}{ts_str}.dat",
+        ]
+        for path in candidates:
+            if path.exists():
+                return path
+        return candidates[0]
 
     def active_node_name(self) -> Optional[str]:
         return self.state.active_name

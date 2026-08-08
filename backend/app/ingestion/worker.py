@@ -154,7 +154,8 @@ class IngestionWorker:
         sensors: list[Sensor],
         ts: datetime,
     ) -> None:
-        # Build unified sensor specs (position for 1-min, fallback_slice for raw)
+        # Build unified sensor specs (position for 1-min, fallback_slice for raw,
+        # WIDN symbol/station for auto column mapping)
         specs: dict[str, dict] = {}
         for s in sensors:
             if not s.is_enabled:
@@ -164,6 +165,10 @@ class IngestionWorker:
                 entry["position"] = s.position
             if s.fallback_slice:
                 entry["fallback_slice"] = s.fallback_slice
+            if s.symbol:
+                entry["symbol"] = s.symbol
+            if s.station:
+                entry["station"] = s.station
             specs[s.code] = entry
 
         # Try each file prefix for the site until one parses

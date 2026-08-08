@@ -37,4 +37,7 @@ export const api = {
     if (sensorCode) params.set('sensor_code', sensorCode)
     return request(`/sla-ola/events?${params.toString()}`)
   },
+
+  // System health / connectivity
+  getSystemHealth: () => request('/system/health'),
 }

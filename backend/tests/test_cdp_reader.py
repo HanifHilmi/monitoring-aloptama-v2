@@ -60,15 +60,21 @@ def test_resolve_site_file_on_active() -> None:
     ts = datetime(2026, 1, 1, 0, 30, tzinfo=timezone.utc)
     path = reader.resolve_site_file("DCPA", ts)
     assert path is not None
-    assert str(path).endswith("/mnt/cdp1_logs/oneminute/DCPA202601010030.OneMinute.dat")
+    name = path.name
+    # Real WIDN layout: daily file. With the local CDP mount present the
+    # resolver's universal-station glob matches 091OneMinute.20260101.dat;
+    # otherwise it falls back to the site-prefixed candidate. Both end in
+    # OneMinute.20260101.dat.
+    assert name.startswith(("DCPAOneMinute", "091OneMinute"))
+    assert name.endswith("OneMinute.20260101.dat")
 
 
 def test_resolve_raw_sensor_file_on_active() -> None:
     reader = _reader()
     ts = datetime(2026, 1, 1, 0, 30, tzinfo=timezone.utc)
-    path = reader.resolve_raw_sensor_file("DCPA", ts)
+    path = reader.resolve_raw_sensor_file("RWYA", ts)
     assert path is not None
-    assert str(path).endswith("/mnt/cdp1_logs/sensor/DCPA20260101.dat")
+    assert str(path).endswith("/mnt/cdp1_logs/sensor/RWYA.DCP.2026010100.dat")
 
 
 def test_resolve_after_failover_uses_new_active() -> None:
@@ -78,7 +84,8 @@ def test_resolve_after_failover_uses_new_active() -> None:
     ts = datetime(2026, 1, 1, 0, 30, tzinfo=timezone.utc)
     path = reader.resolve_site_file("DCPA", ts)
     assert path is not None
-    assert str(path).endswith("/mnt/cdp2_logs/oneminute/DCPA202601010030.OneMinute.dat")
+    assert str(path).startswith("/mnt/cdp2_logs/oneminute/")
+    assert path.name.endswith("OneMinute.20260101.dat")
 
 
 def test_resolve_none_without_active() -> None:
