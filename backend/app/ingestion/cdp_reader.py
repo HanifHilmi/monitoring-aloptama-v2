@@ -1,16 +1,15 @@
-"""Active-Passive CDP node reader with automatic failover.
+"""Active-Passive CDP node reader with live liveness probing.
 
-The system monitors two CDP nodes over network mounts:
+CDP status = INSTANT network reachability, NOT the oneminute folder:
 
-* CDP1 (172.70.55.162, /mnt/cdp1_logs/) - active
-* CDP2 (172.70.55.163, /mnt/cdp2_logs/) - passive
-
-Failover rules:
-- Normal operation reads exclusively from the active node.
-- If the active node becomes unreachable (probe timeout / I/O error), the
-  passive node is promoted to active and becomes the reader source.
-- When the original active node recovers, it stays passive until the
-  current active fails (no flapping).
+- ``_probe_host`` sends a short TCP connect to common AWOS CDP ports
+  (80 HTTP, 443 HTTPS, 22 SSH, 2049 NFS); the first port that opens
+  marks the node ONLINE. This is effectively a network-level ping that
+  works from inside a container without root for ICMP.
+- The mount path (``/mnt/cdpX_logs``) is NOT part of liveness — the
+  oneminute folder is used only for the historical SLA/OLa backfill.
+- The worker probes every ``cdps_check_interval_seconds`` and persists a
+  ``cdp_connectivity`` row per probe for SLA history.
 """
 
 from __future__ import annotations
@@ -57,10 +56,18 @@ class CdpReaderState:
         return self.nodes.get(self.active_name)
 
 
+# Ports probed for a live TCP connect. 80 (HTTP webserver) first since the
+# user asked for port 80; SSH/NFS are common on the AWS unit.
+PROBE_PORTS = [80, 443, 22, 2049]
+
+
 async def _probe_host(ip: str, timeout: float) -> tuple[bool, Optional[float], Optional[str]]:
-    """Probe a CDP host using TCP connects to known service ports."""
-    attempts = [(2049, "NFS mount port"), (22, "SSH port")]
-    for port, label in attempts:
+    """Instant TCP-connect liveness probe (network ping equivalent).
+
+    Returns (reachable, rtt_ms, error_message). First port that opens wins.
+    """
+    last_error = "no probe ports configured"
+    for port in PROBE_PORTS:
         try:
             start = asyncio.get_event_loop().time()
             _reader, writer = await asyncio.wait_for(
@@ -74,12 +81,16 @@ async def _probe_host(ip: str, timeout: float) -> tuple[bool, Optional[float], O
                 pass
             return True, round(rtt_ms, 2), None
         except (asyncio.TimeoutError, OSError) as exc:
-            last_error = f"{label}: {exc}"
+            last_error = f"port {port}: {exc}"
     return False, None, last_error
 
 
 async def _check_mount_path(mount_path: str, timeout: float) -> tuple[bool, Optional[str]]:
-    """Verify the network mount path is present and listable."""
+    """Verify the network mount path exists INSIDE the container.
+
+    Informational only — the mount is for reading oneminute logs and is
+    NOT part of live CDP reachability.
+    """
     try:
         path = Path(mount_path)
         if not path.exists():
@@ -130,11 +141,17 @@ class CdpReader:
             return results
 
     async def _check_node(self, node: NodeState) -> NodeState:
-        ok_host, rtt_ms, err = await _probe_host(node.ip, settings.connectivity_timeout_seconds)
+        # INSTANT liveness = network probe only (ports 80/443/22/2049).
+        ok_host, rtt_ms, err = await _probe_host(
+            node.ip, settings.connectivity_timeout_seconds
+        )
+
+        # Mount check is informational only (for debugging log availability).
         ok_mount, mount_err = await _check_mount_path(
             node.mount_path, settings.connectivity_timeout_seconds
         )
-        reachable = ok_host and ok_mount
+
+        reachable = ok_host
         node.last_check = datetime.now(timezone.utc)
         node.last_rtt_ms = rtt_ms
         node.error_message = err or mount_err
@@ -172,18 +189,12 @@ class CdpReader:
         Real layout observed on CDP1/CDP2:
             <mount_path>/oneminute/091OneMinute.<YYYYMMDD>.dat
         The file is *daily*; every data row carries its own minute.
-        `site_prefix` is the station prefix (e.g. '091'); for newer CDP
-        versions files may be per-site, in which case we fall back to the
-        common station file.
         """
         active = self.state.active_node()
         if active is None:
             return None
         ts_str = ts.strftime("%Y%m%d")
         oneminute_dir = Path(active.mount_path) / "oneminute"
-        # The station's daily file (091OneMinute.<date>.dat) holds all site
-        # rows (04/22/M in columns). Try the site prefix, then any file
-        # matching *OneMinute.<date>.dat (the universal WIDN station file).
         candidates = [
             oneminute_dir / f"{site_prefix}OneMinute.{ts_str}.dat",
             oneminute_dir / f"{site_prefix}{ts_str}.OneMinute.dat",
@@ -191,22 +202,14 @@ class CdpReader:
         for path in candidates:
             if path.exists():
                 return path
-        # Universal station file: e.g. 091OneMinute.20260101.dat
         if oneminute_dir.is_dir():
             matches = [p for p in oneminute_dir.glob(f"*OneMinute.{ts_str}.dat")]
             if matches:
                 return matches[0]
-        # Return the primary expected path anyway; caller falls back to raw.
         return candidates[0]
 
     def resolve_raw_sensor_file(self, site_prefix: str, ts: datetime) -> Optional[Path]:
-        """Raw DCP files are not used as a data source.
-
-        The monitoring source is exclusively the 1-minute WIDN report in
-        ``/oneminute/``. This method is kept for API compatibility but
-        returns the daily oneminute file (the raw data path is deferred for
-        a future realtime view).
-        """
+        """Raw DCP files are not used as a data source."""
         return self.resolve_site_file(site_prefix, ts)
 
     def active_node_name(self) -> Optional[str]:
