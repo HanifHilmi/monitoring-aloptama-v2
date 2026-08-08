@@ -50,10 +50,14 @@ def _parse_backfill_start(value: str) -> datetime:
 
 
 async def is_database_uninitialized(session: AsyncSession) -> bool:
-    """True when no telemetry and no connectivity samples exist."""
+    """True when no telemetry exists.
+
+    Live CDP connectivity probes run continuously, so cdp_connectivity rows
+    appear even on a fresh database. Telemetry is the true signal for whether
+    the historical backfill has populated sensor data.
+    """
     tel = (await session.execute(select(func.count(Telemetry.time)))).scalar_one()
-    conn = (await session.execute(select(func.count(CdpConnectivity.time)))).scalar_one()
-    return tel == 0 and conn == 0
+    return tel == 0
 
 
 async def run_initial_backfill_if_needed(
