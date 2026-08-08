@@ -154,7 +154,9 @@ async def get_sla_ola_summary(
         rows.append(
             {
                 "scope": "sla",
-                "entity_type": "cdp_node",
+                # `cdp` matches the /sla-ola/daily endpoint's
+                # entity_type pattern ^(cdp|sensor)$.
+                "entity_type": "cdp",
                 "entity_id": cdp["cdp_id"],
                 "entity": cdp["name"],
                 "uptime_pct": cdp["uptime_pct"],
