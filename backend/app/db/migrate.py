@@ -123,6 +123,20 @@ def _split_sql_statements(sql: str) -> list[str]:
     return statements
 
 
+async def reset_database(session: AsyncSession) -> None:
+    """Drop all objects so a fresh deploy starts from an empty database.
+
+    TimescaleDB registers the ``timescaledb`` extension in the public
+    schema; dropping the schema removes that registration, and migration
+    001 re-creates it (``CREATE EXTENSION IF NOT EXISTS timescaledb``).
+    Call before running migrations when ``RESET_DB_ON_BOOT=true``.
+    """
+    await session.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
+    await session.execute(text("CREATE SCHEMA public"))
+    await session.commit()
+    logger.info("Database reset (public schema recreated)")
+
+
 async def is_database_initialized(session: AsyncSession) -> bool:
     """True when telemetry/connectivity data already exists (skip backfill)."""
     from app.services.backfill import is_database_uninitialized

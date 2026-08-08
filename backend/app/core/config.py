@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     db_pool_size: int = 10
     db_max_overflow: int = 20
     db_pool_pre_ping: bool = True
+    # While in development: drop the public schema + re-run all migrations
+    # on every deploy so the database is clean.
+    reset_db_on_boot: bool = False
 
     # ---- CDP network nodes ----
     cdp1_ip: str = "172.22.39.162"

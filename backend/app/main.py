@@ -1,16 +1,11 @@
 """FastAPI application entrypoint.
 
 Boot sequence:
-1. Apply pending migrations (idempotent, owned by this process).
-2. Start serving HTTP immediately.
-
-Heavy work (historical backfill, CDP probing, telemetry ingestion, rollup
-rebuilds) runs exclusively in the dedicated ``worker`` container.  We
-deliberately do NOT start the ingestion worker in this process: the worker
-performs synchronous NFS/CDP file I/O (``Path.exists``, ``glob``,
-``read_text``) which would block the asyncio event loop and make every HTTP
-request (including ``/health``) hang — surfacing as 504 Gateway Timeouts at
-the proxy.
+1. If ``RESET_DB_ON_BOOT=true`` (dev mode): drop + recreate the public
+   schema so every deploy starts clean (backfill is manual from UI).
+2. Apply migrations (idempotent).
+3. The ingestion worker runs in its own container; the API never starts
+   the worker so the async event loop is free to serve HTTP quickly.
 """
 
 from __future__ import annotations
@@ -23,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.core.config import settings
-from app.db.migrate import run_migrations
+from app.db.migrate import reset_database, run_migrations
 from app.db.session import AsyncSessionLocal
 
 logging.basicConfig(
@@ -35,22 +30,20 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup/shutdown lifecycle.
-
-    Only migrations run here (brief, idempotent, advisory-lock guarded).
-    No ingestion/backfill/rollup work is started inline so the API is ready
-    to answer health checks as soon as uvicorn binds the socket.
-    """
+    """Startup/shutdown lifecycle."""
     try:
-        # Apply pending migrations (idempotent). The worker container runs
-        # with ENABLE_MIGRATIONS_ON_BOOT=false to avoid lock races on boot.
+        # 0) Development reset: fresh empty DB each deploy.
+        if settings.reset_db_on_boot:
+            async with AsyncSessionLocal() as session:
+                await reset_database(session)
+                logger.info("DB reset on boot: schema dropped + recreated")
+
+        # 1) Apply pending migrations (idempotent)
         if settings.enable_migrations_on_boot:
             async with AsyncSessionLocal() as session:
                 applied = await run_migrations(session)
                 if applied:
                     logger.info("Applied migrations: %s", ", ".join(applied))
-
-        logger.info("Monitoring Aloptama V2 API started")
         yield
     finally:
         logger.info("Shutdown complete")
