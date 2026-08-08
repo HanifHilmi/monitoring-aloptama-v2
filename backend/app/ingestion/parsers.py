@@ -1,9 +1,13 @@
 """WIDN 1-minute log parser.
 
-The WIDN daily report (``091OneMinute.<YYYYMMDD>.dat``) has per-station
-(04/M/22) metric blocks. Each sensor maps to one or more WIDN symbols.
-TEMP/DEWP/QNH are transmitted with one extra digit (e.g. 253 => 25.3 C,
-10108 => 1010.8 hPa); `scale` divides the raw value accordingly.
+WIDN daily report (``091OneMinute.<YYYYMMDD>.dat``) with per-station
+(04/M/22) metric blocks. Sensor->metric semantics:
+  ATRH: TEMP DEWP RH        BARO: QNH        ANEM: WS WD WGS
+  PWX : PW (ONLY)           RVR : RVR VIS    ALS : ALS_INT D/N (RWY04)
+  CEL : LR1 SKY             RAIN: RA         SOLR: SOL      LIGH: LTX
+Visibility (VIS) belongs to the RVR sensor, never PWX. TEMP/DEWP/QNH are
+transmitted with a trailing digit (253 => 25.3 C, 10108 => 1010.8 hPa);
+`scale` adjusts the raw value.
 """
 
 from __future__ import annotations
@@ -54,7 +58,7 @@ def parse_timestamp_from_filename(filename: str) -> Optional[datetime]:
     return None
 
 
-# WIDN symbol -> sensor metric descriptor (scale divides raw value).
+# Sensor -> WIDN symbol slots. VIS belongs to RVR, not PWX.
 SENSOR_METRICS = {
     "ATRH": [
         {"metric": "TEMP", "symbol": "TEMP", "scale": 0.1},
@@ -69,13 +73,15 @@ SENSOR_METRICS = {
     ],
     "PWX": [
         {"metric": "PW", "symbol": "PW"},
-        {"metric": "VIS", "symbol": "VIS"},
     ],
     "CEL": [
         {"metric": "LR1", "symbol": "LR1"},
         {"metric": "SKY", "symbol": "SKY"},
     ],
-    "RVR": [{"metric": "RVR", "symbol": "RVR"}],
+    "RVR": [
+        {"metric": "RVR", "symbol": "RVR"},
+        {"metric": "VIS", "symbol": "VIS"},
+    ],
     "ALS": [
         {"metric": "ALS_INT", "symbol": "ALS"},
         {"metric": "D/N", "symbol": "D/N"},

@@ -3,7 +3,8 @@
 - ``POST /backfill/cdp``  : Backfill CDP uptime from the oneminute WIDN
   history (file availability per day).
 - ``POST /backfill/dcp``  : Backfill DCP (sensor) data from oneminute files.
-Both stream progress lines back so the Settings panel shows a live log.
+Both stream progress lines back so the Settings panel shows a live log, and
+log per-day summaries to the container log for deployed-environment analysis.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal
@@ -50,7 +52,7 @@ async def _stream_cdp():
             start = _parse(settings.backfill_start)
             now = datetime.now(timezone.utc)
             cursor = start
-            processed = 0
+            count = 0
             while cursor < now:
                 one_min = None
                 for site in sites:
@@ -61,27 +63,32 @@ async def _stream_cdp():
                     if one_min:
                         break
                 available = False
-                if one_min and one_min.exists():
+                src = None
+                if one_min is not None and one_min.exists():
+                    src = one_min.name
                     try:
                         content = one_min.read_text(encoding="utf-8", errors="replace")
                         available = bool(content.strip())
-                    except OSError:
-                        available = False
+                    except OSError as exc:
+                        logger.warning("backfill cdp: read error %s: %s", one_min, exc)
                 for node in nodes:
+                    # Use the postgresql insert() so on_conflict_do_update works.
                     await session.execute(
-                        CdpConnectivity.__table__.insert()
+                        insert(CdpConnectivity)
                         .values(time=cursor, cdp_id=node.id, reachable=available, rtt_ms=None)
                         .on_conflict_do_update(
                             index_elements=["time", "cdp_id"],
                             set_={"reachable": available, "error_message": None},
                         )
                     )
-                processed += 1
-                if processed % 30 == 0:
+                count += 1
+                if count % 30 == 0:
                     await session.commit()
+                    logger.info("CDP backfill %s avail=%s src=%s", cursor.date(), available, src)
                     yield _sse(f"CDP backfill {cursor.date()} ...")
                 cursor += timedelta(days=1)
             await session.commit()
+            logger.info("CDP backfill complete (%d days)", count)
             yield _sse("CDP backfill COMPLETE")
     except Exception as exc:  # noqa: BLE001
         logger.exception("CDP backfill failed")
@@ -130,20 +137,27 @@ async def _stream_dcp():
                     continue
 
                 cursor = start
+                day_rows = 0
                 while cursor < now:
                     one_min = None
+                    src = None
                     for prefix in site.file_prefixes or []:
                         one_min = reader.resolve_site_file(prefix, cursor)
                         if one_min and one_min.exists():
+                            src = one_min.name
                             break
-                    if one_min and one_min.exists():
+                    if one_min is not None and one_min.exists():
                         default_ts = parse_timestamp_from_filename(one_min.name) or cursor
                         recs = parse_one_minute_file(one_min, specs, default_ts)
+                        minutes = len(recs)
+                        metrics = 0
                         for rec in recs:
                             for m in rec.metrics:
-                                sensor = sensor_by_code[m.sensor_code]
+                                sensor = sensor_by_code.get(m.sensor_code)
+                                if sensor is None:
+                                    continue
                                 await session.execute(
-                                    Telemetry.__table__.insert()
+                                    insert(Telemetry)
                                     .values(
                                         time=rec.ts, sensor_id=sensor.id,
                                         metric=m.metric, value=m.value,
@@ -161,13 +175,19 @@ async def _stream_dcp():
                                         },
                                     )
                                 )
+                                metrics += 1
+                        day_rows += minutes
+                        logger.info(
+                            "DCP backfill site=%s day=%s minutes=%d metrics=%d src=%s",
+                            site.slug, cursor.date(), minutes, metrics, src,
+                        )
                     else:
                         # File missing => mark each site sensor metric invalid.
                         for s in site_sensors:
                             if not s.is_enabled:
                                 continue
                             await session.execute(
-                                Telemetry.__table__.insert()
+                                insert(Telemetry)
                                 .values(
                                     time=cursor, sensor_id=s.id, metric="missing",
                                     value=None, text_value=None, status="missing",
@@ -178,10 +198,12 @@ async def _stream_dcp():
                                     set_={"status": "missing", "is_valid": False},
                                 )
                             )
+                        logger.info("DCP backfill site=%s day=%s src=MISSING", site.slug, cursor.date())
                     cursor += timedelta(days=1)
                     if cursor.minute % 15 == 0:
                         await session.commit()
                 await session.commit()
+                logger.info("DCP backfill site=%s done (%d minute-rows)", site.slug, day_rows)
                 yield _sse(f"DCP backfill site {site.slug} complete")
             yield _sse("DCP backfill COMPLETE")
     except Exception as exc:  # noqa: BLE001

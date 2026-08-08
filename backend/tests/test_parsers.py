@@ -38,7 +38,9 @@ def test_parse_widn_metrics(widn_file: Path) -> None:
     assert by_code[("ANEM", "WGS")].is_valid is False
     assert by_code[("CEL", "LR1")].value == 5.0
     assert by_code[("ALS", "ALS_INT")].value == 1047.0
-    assert by_code[("PWX", "VIS")].value == 13459.0
+    # VIS belongs to RVR, not PWX (product semantics).
+    assert by_code[("RVR", "VIS")].value == 13459.0
+    assert ("PWX", "VIS") not in by_code
 
 
 def test_parse_widn_station22(widn_file: Path) -> None:
