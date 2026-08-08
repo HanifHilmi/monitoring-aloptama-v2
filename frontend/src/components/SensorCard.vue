@@ -79,24 +79,24 @@ const windGustPanel = computed(() => {
 async function load() {
   loading.value = true
   error.value = null
+  // Keep the previous data visible while fetching to avoid a chart
+  // flicker/disappear on every 30s refresh.
+  const prev = metrics.value
   try {
-    metrics.value = {}
     const data = await api.getTelemetry(props.siteSlug, props.sensor.code, props.range, 1500)
-    // Group samples by metric - need metrics list but API returns selected one
     const all = await Promise.all(
       (data.metrics || []).map((m) =>
         api.getTelemetry(props.siteSlug, props.sensor.code, props.range, 1500, m),
       ),
     )
-    for (const d of all) {
-      metrics.value[d.metric] = d.samples || []
-    }
-    if (!Object.keys(metrics.value).length && data.samples) {
-      metrics.value[data.metric] = data.samples
-    }
+    const next = {}
+    for (const d of all) next[d.metric] = d.samples || []
+    if (!Object.keys(next).length && data.samples) next[data.metric] = data.samples
+    metrics.value = next
   } catch (e) {
     error.value = e.message
-    metrics.value = {}
+    // Restore previous data so the card doesn't blank on transient errors
+    if (!Object.keys(metrics.value).length) metrics.value = prev
   } finally {
     loading.value = false
   }
@@ -132,6 +132,7 @@ onUnmounted(() => clearInterval(timer.value))
       No wind gusts in this range
     </div>
 
+    <Transition name="fade" mode="out-in">
     <div v-if="loading && !Object.keys(metrics.value).length" class="flex h-[160px] items-center justify-center text-xs text-slate-500">
       Loading…
     </div>
@@ -151,5 +152,6 @@ onUnmounted(() => clearInterval(timer.value))
     <div v-else class="flex h-[160px] items-center justify-center text-xs text-slate-500">
       No telemetry in this range
     </div>
+    </Transition>
   </div>
 </template>

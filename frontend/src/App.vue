@@ -11,29 +11,44 @@ const nav = [
   { to: '/sla-ola', label: 'SLA / OLA' },
 ]
 
+// ---- UTC / WIB toggle ----
+const tz = ref('UTC')
+const TZ_LABELS = { UTC: 'UTC', WIB: 'WIB (UTC+7)' }
+const event = ref(new Event('tzchange'))
+
+function setTz(v) {
+  tz.value = v
+  window.dispatchEvent(new Event('tzchange'))
+}
+
+// ---- System health (green dot expands) ----
 const health = ref(null)
 const healthOpen = ref(false)
 let healthTimer = null
-
 const healthStatus = () => health.value?.status || 'unknown'
-const healthClass = () => {
-  const s = healthStatus()
-  if (s === 'ok') return 'text-emerald-400'
-  if (s === 'degraded') return 'text-amber-400'
-  return 'text-red-400'
-}
-const dotClass = () => {
-  const s = healthStatus()
-  if (s === 'ok') return 'bg-emerald-400'
-  if (s === 'degraded') return 'bg-amber-400'
-  return 'bg-red-400'
+const dotClass = () => (healthStatus() === 'ok' ? 'bg-emerald-400' : healthStatus() === 'degraded' ? 'bg-amber-400' : 'bg-red-400')
+async function loadHealth() {
+  try { health.value = await api.getSystemHealth() } catch { health.value = null }
 }
 
-async function loadHealth() {
+// ---- Settings (gear) ----
+const settingsOpen = ref(false)
+const settingTab = ref('backfill')
+const backfillLog = ref('')
+const backfilling = ref('')
+
+async function runBackfill(kind) {
+  if (backfilling.value) return
+  backfilling.value = kind
+  backfillLog.value = ''
+  const onLine = (l) => { backfillLog.value += l + '\n' }
   try {
-    health.value = await api.getSystemHealth()
-  } catch {
-    health.value = null
+    if (kind === 'cdp') await api.backfillCdp(onLine)
+    else await api.backfillDcp(onLine)
+  } catch (e) {
+    backfillLog.value += 'ERROR: ' + e.message + '\n'
+  } finally {
+    backfilling.value = ''
   }
 }
 
@@ -47,7 +62,7 @@ onUnmounted(() => clearInterval(healthTimer))
 <template>
   <div class="min-h-screen">
     <header class="sticky top-0 z-40 border-b border-runway-border bg-runway-dark/95 backdrop-blur">
-      <div class="mx-auto flex max-w-7xl items-center gap-6 px-4 py-3">
+      <div class="mx-auto flex max-w-7xl items-center gap-5 px-4 py-3">
         <RouterLink to="/" class="flex items-center gap-2 text-lg font-semibold text-white">
           <span class="inline-block h-3 w-3 rounded-sm bg-emerald-400" />
           <span>AWOS Monitor</span>
@@ -65,67 +80,79 @@ onUnmounted(() => clearInterval(healthTimer))
           </RouterLink>
         </nav>
         <div class="relative flex items-center gap-2">
-          <span class="inline-block h-2.5 w-2.5 rounded-full" :class="dotClass()" />
-          <span class="text-xs font-semibold uppercase tracking-wide" :class="healthClass()">
-            {{ healthStatus() }}
-          </span>
+          <!-- Timezone toggle -->
           <button
             class="rounded-md border border-runway-border px-2 py-1 text-xs text-slate-300 hover:bg-runway-panel"
-            @click="healthOpen = !healthOpen"
+            @click="setTz(tz === 'UTC' ? 'WIB' : 'UTC')"
           >
-            System
+            {{ TZ_LABELS[tz] }}
           </button>
+          <!-- Green status dot expands on hover to show system health -->
+          <span
+            class="inline-block h-2.5 w-2.5 rounded-full cursor-pointer"
+            :class="dotClass()"
+            @mouseenter="healthOpen = true"
+            @mouseleave="healthOpen = false"
+          />
           <div
-            v-if="healthOpen"
-            class="absolute right-0 top-full mt-2 w-72 rounded-lg border border-runway-border bg-runway-panel p-3 text-xs shadow-xl"
+            v-if="healthOpen && health"
+            class="absolute right-0 top-full mt-2 w-60 rounded-lg border border-runway-border bg-runway-panel p-3 text-xs shadow-xl"
           >
-            <div class="mb-2 flex items-baseline justify-between">
-              <span class="font-semibold uppercase tracking-wide text-slate-400">System Health</span>
-              <span class="text-[10px] text-slate-500">
-                {{ health?.generated_at ? new Date(health.generated_at).toLocaleTimeString() : '—' }}
-              </span>
+            <div class="space-y-1">
+              <div class="flex justify-between"><span class="text-slate-400">API</span><span class="text-emerald-400">{{ health.components?.api?.status }}</span></div>
+              <div class="flex justify-between"><span class="text-slate-400">Database</span><span :class="health.components?.database?.status === 'ok' ? 'text-emerald-400' : 'text-red-400'">{{ health.components?.database?.status }}</span></div>
+              <div class="flex justify-between"><span class="text-slate-400">Worker</span><span :class="health.components?.worker?.status === 'ok' ? 'text-emerald-400' : 'text-amber-400'">{{ health.components?.worker?.status }}</span></div>
+              <div class="flex justify-between"><span class="text-slate-400">Telemetry rows</span><span class="text-slate-200">{{ health.components?.data?.telemetry_rows ?? '—' }}</span></div>
             </div>
-            <div v-if="health" class="space-y-2">
-              <div class="flex justify-between">
-                <span class="text-slate-400">API</span>
-                <span :class="health.components?.api?.status === 'ok' ? 'text-emerald-400' : 'text-red-400'">
-                  {{ health.components?.api?.status }}
-                </span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-slate-400">Database</span>
-                <span :class="health.components?.database?.status === 'ok' ? 'text-emerald-400' : 'text-red-400'">
-                  {{ health.components?.database?.status }}
-                </span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-slate-400">Worker</span>
-                <span :class="health.components?.worker?.status === 'ok' ? 'text-emerald-400' : health.components?.worker?.status === 'unknown' ? 'text-amber-400' : 'text-red-400'">
-                  {{ health.components?.worker?.status }}
-                </span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-slate-400">Telemetry rows</span>
-                <span class="text-slate-200">{{ health.components?.data?.telemetry_rows ?? '—' }}</span>
-              </div>
-              <div class="border-t border-runway-border pt-2">
-                <div class="mb-1 text-[10px] uppercase tracking-wide text-slate-500">CDP Config</div>
-                <div class="text-[10px] text-slate-400">
-                  CDP1: {{ health.config?.cdp1?.ip }} · {{ health.config?.cdp1?.mount_path }}
-                </div>
-                <div class="text-[10px] text-slate-400">
-                  CDP2: {{ health.config?.cdp2?.ip }} · {{ health.config?.cdp2?.mount_path }}
-                </div>
-                <div class="text-[10px] text-slate-400">
-                  Backfill: {{ health.config?.backfill_enabled ? 'on' : 'off' }} (from {{ health.config?.backfill_start }})
-                </div>
-              </div>
-            </div>
-            <div v-else class="py-3 text-center text-slate-500">Unreachable</div>
           </div>
+          <!-- Gear settings (contains Backfill) -->
+          <button
+            class="rounded-md border border-runway-border px-2 py-1 text-xs text-slate-300 hover:bg-runway-panel"
+            @click="settingsOpen = !settingsOpen"
+          >
+            ⚙ Settings
+          </button>
         </div>
       </div>
     </header>
+
+    <!-- Settings drawer -->
+    <div v-if="settingsOpen" class="fixed inset-0 z-50 flex justify-end bg-black/50" @click.self="settingsOpen = false">
+      <div class="h-full w-full max-w-md overflow-y-auto border-l border-runway-border bg-runway-dark p-5">
+        <div class="mb-4 flex items-center justify-between">
+          <h2 class="text-lg font-semibold text-slate-200">Settings</h2>
+          <button class="text-slate-400 hover:text-white" @click="settingsOpen = false">✕</button>
+        </div>
+        <div class="mb-4 flex gap-2">
+          <button
+            class="rounded px-3 py-1 text-xs"
+            :class="settingTab === 'backfill' ? 'bg-runway-panel text-white' : 'text-slate-400'"
+            @click="settingTab = 'backfill'"
+          >Backfill</button>
+        </div>
+
+        <div v-if="settingTab === 'backfill'">
+          <div class="mb-3 text-xs text-slate-400">Backfill historical data into the database from the CDP oneminute logs.</div>
+          <div class="flex gap-2">
+            <button
+              class="rounded bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+              :disabled="!!backfilling"
+              @click="runBackfill('cdp')"
+            >Backfill CDP uptime</button>
+            <button
+              class="rounded bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+              :disabled="!!backfilling"
+              @click="runBackfill('dcp')"
+            >Backfill DCP Data</button>
+          </div>
+          <div class="mt-4">
+            <div class="mb-1 text-xs text-slate-400">Log</div>
+            <pre class="h-72 overflow-auto rounded border border-runway-border bg-black/40 p-2 text-[10px] leading-relaxed text-emerald-300">{{ backfillLog || '— idle —' }}</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <main class="mx-auto max-w-7xl px-4 py-6">
       <RouterView />
     </main>

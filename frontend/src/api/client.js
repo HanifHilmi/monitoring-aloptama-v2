@@ -25,7 +25,12 @@ export const api = {
     return request(`/telemetry/${siteSlug}/${sensorCode}?${q.toString()}`)
   },
 
-  // SLA / OLA
+  // SLA / OLA (corrected semantics)
+  getAvailability: (range = 'month') =>
+    request(`/sla-ola/summary?range=${range}`),
+  getAvailabilityHistory: (bucket = 'daily', span = 'month') =>
+    request(`/sla-ola/history?bucket=${bucket}&span=${span}`),
+  // Legacy alias kept for SlaOlaView until migrated
   getSlaOlaSummary: (range = '30d') =>
     request(`/sla-ola/summary?range=${range}`),
   getDailyRollup: (scope, entityType, entityId, days = 30) =>
@@ -41,4 +46,42 @@ export const api = {
 
   // System health / connectivity
   getSystemHealth: () => request('/system/health'),
+
+  // Manual backfill (SSE progress lines)
+  backfillCdp: async (onLine) => {
+    const res = await fetch('/api/v1/backfill/cdp', { method: 'POST' })
+    if (!res.ok || !res.body) throw new Error(`backfill failed: ${res.status}`)
+    const reader = res.body.getReader()
+    const dec = new TextDecoder()
+    let buf = ''
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += dec.decode(value, { stream: true })
+      const parts = buf.split('\n\n')
+      buf = parts.pop() || ''
+      for (const part of parts) {
+        const line = part.replace(/^data:\s*/, '').trim()
+        if (line) onLine(line)
+      }
+    }
+  },
+  backfillDcp: async (onLine) => {
+    const res = await fetch('/api/v1/backfill/dcp', { method: 'POST' })
+    if (!res.ok || !res.body) throw new Error(`backfill failed: ${res.status}`)
+    const reader = res.body.getReader()
+    const dec = new TextDecoder()
+    let buf = ''
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += dec.decode(value, { stream: true })
+      const parts = buf.split('\n\n')
+      buf = parts.pop() || ''
+      for (const part of parts) {
+        const line = part.replace(/^data:\s*/, '').trim()
+        if (line) onLine(line)
+      }
+    }
+  },
 }
