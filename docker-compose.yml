@@ -38,6 +38,9 @@ services:
       ENABLE_BACKFILL_ON_BOOT: ${ENABLE_BACKFILL_ON_BOOT:-true}
       ENABLE_MIGRATIONS_ON_BOOT: "true"
       ENVIRONMENT: ${ENVIRONMENT:-prod}
+    volumes:
+      - ${CDP1_MOUNT_PATH:-/mnt/cdp1_logs/}:/mnt/cdp1_logs
+      - ${CDP2_MOUNT_PATH:-/mnt/cdp2_logs/}:/mnt/cdp2_logs
     depends_on:
       db:
         condition: service_healthy
@@ -73,6 +76,9 @@ services:
       ENABLE_BACKFILL_ON_BOOT: ${ENABLE_BACKFILL_ON_BOOT:-true}
       ENABLE_MIGRATIONS_ON_BOOT: "true"
       ENVIRONMENT: ${ENVIRONMENT:-prod}
+    volumes:
+      - ${CDP1_MOUNT_PATH:-/mnt/cdp1_logs/}:/mnt/cdp1_logs
+      - ${CDP2_MOUNT_PATH:-/mnt/cdp2_logs/}:/mnt/cdp2_logs
     depends_on:
       db:
         condition: service_healthy
