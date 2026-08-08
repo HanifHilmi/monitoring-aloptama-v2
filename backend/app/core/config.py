@@ -1,7 +1,6 @@
 """Application configuration - loaded from environment / .env."""
 
 from functools import lru_cache
-from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -14,7 +13,10 @@ class Settings(BaseSettings):
     # ---- App ----
     app_name: str = "Monitoring Aloptama V2"
     app_version: str = "2.0.0"
-    environment: Literal["dev", "test", "prod"] = "dev"
+    # Coolify / Docker often inject ENVIRONMENT with arbitrary values
+    # (e.g. "prod", "production", "staging", "Development", ""). Accept any
+    # string so a strict enum never crashes startup (crash-loop protection).
+    environment: str = "production"
     debug: bool = False
     api_prefix: str = "/api/v1"
 
