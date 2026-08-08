@@ -1,3 +1,5 @@
+import { displayTime } from './timezone'
+
 const AXIS_COLOR = '#64748b'
 const SPLIT_COLOR = 'rgba(148, 163, 184, 0.12)'
 
@@ -15,9 +17,17 @@ function baseTooltip() {
   }
 }
 
+// Normalize a raw time (ISO or Date) to UTC+? shifted display ISO.
+const shift = (t) => displayTime(new Date(t).toISOString())
+
 export function buildTimeSeriesOption({ times, series, unit = '', color = '#38bdf8' }) {
+  const shifted = times.map(shift)
   return {
-    animation: false,
+    animation: true,
+    animationDuration: 500,
+    animationDurationUpdate: 500,
+    animationEasing: 'linear',
+    animationEasingUpdate: 'linear',
     grid: baseGrid(),
     tooltip: {
       ...baseTooltip(),
@@ -40,7 +50,7 @@ export function buildTimeSeriesOption({ times, series, unit = '', color = '#38bd
     series: [
       {
         type: 'line',
-        data: times.map((t, i) => [t, series[i]]),
+        data: shifted.map((t, i) => [t, series[i]]),
         showSymbol: false,
         lineStyle: { width: 1.5, color },
         itemStyle: { color },
@@ -51,10 +61,14 @@ export function buildTimeSeriesOption({ times, series, unit = '', color = '#38bd
   }
 }
 
-// Dual-axis line chart for sensors with two units (e.g. ATRH: TEMP <-> RH).
+// Dual-axis line chart (ATRH TEMP/RH, ANEM WS/WD). Honours UTC/WIB shift.
 export function buildDualAxisOption({ left, right, leftName = '', rightName = '' }) {
   return {
-    animation: false,
+    animation: true,
+    animationDuration: 500,
+    animationDurationUpdate: 500,
+    animationEasing: 'linear',
+    animationEasingUpdate: 'linear',
     grid: baseGrid(),
     tooltip: { ...baseTooltip() },
     xAxis: {
@@ -85,7 +99,7 @@ export function buildDualAxisOption({ left, right, leftName = '', rightName = ''
       {
         name: leftName,
         type: 'line',
-        data: left.map((p) => [p.time, p.value]),
+        data: left.map((p) => [shift(p.time), p.value]),
         showSymbol: false,
         lineStyle: { width: 1.5, color: '#38bdf8' },
         itemStyle: { color: '#38bdf8' },
@@ -94,7 +108,7 @@ export function buildDualAxisOption({ left, right, leftName = '', rightName = ''
         name: rightName,
         type: 'line',
         yAxisIndex: 1,
-        data: right.map((p) => [p.time, p.value]),
+        data: right.map((p) => [shift(p.time), p.value]),
         showSymbol: false,
         lineStyle: { width: 1.5, color: '#a78bfa' },
         itemStyle: { color: '#a78bfa' },
@@ -103,10 +117,11 @@ export function buildDualAxisOption({ left, right, leftName = '', rightName = ''
   }
 }
 
-// Dot (scatter) chart for e.g. ceilometer LR1; zeros excluded by caller.
+// Dot (scatter) chart for ceilometer LR1 (zeros excluded by caller).
 export function buildDotOption({ points, name = '', color = '#34d399' }) {
   return {
-    animation: false,
+    animation: true,
+    animationDuration: 500,
     grid: baseGrid(),
     tooltip: { ...baseTooltip() },
     xAxis: {
@@ -126,133 +141,9 @@ export function buildDotOption({ points, name = '', color = '#34d399' }) {
     series: [
       {
         type: 'scatter',
-        data: points.map((p) => [p.time, p.value]),
+        data: points.map((p) => [shift(p.time), p.value]),
         symbolSize: 5,
         itemStyle: { color },
-      },
-    ],
-  }
-}
-
-export function buildOlaTimelineOption({ events, startIso, endIso, colorOk = '#10b981', colorDown = '#ef4444' }) {
-  const downBands = events
-    .filter((e) => e.end_time)
-    .map((e) => [
-      { xAxis: e.start_time, itemStyle: { color: colorDown, opacity: 0.18 } },
-      { xAxis: e.end_time, itemStyle: { color: colorDown, opacity: 0.0 } },
-    ])
-
-  return {
-    animation: false,
-    grid: baseGrid(),
-    tooltip: {
-      ...baseTooltip(),
-      formatter(params) {
-        if (Array.isArray(params) && params.length === 2 && params[0].componentType === 'markArea') {
-          const [a, b] = params
-          return `${a.value}<br/>DOWN<br/>${a.value} → ${b.value}`
-        }
-        if (!Array.isArray(params) && params.componentType === 'markLine') {
-          return `DOWN since<br/>${params.value}`
-        }
-        return ''
-      },
-    },
-    xAxis: {
-      type: 'time',
-      min: startIso,
-      max: endIso,
-      axisLine: { lineStyle: { color: AXIS_COLOR } },
-      axisLabel: { color: AXIS_COLOR, fontSize: 11 },
-      splitLine: { show: false },
-    },
-    yAxis: {
-      type: 'category',
-      data: ['DOWN', 'OK'],
-      axisLabel: { color: AXIS_COLOR, fontSize: 11 },
-      splitLine: { show: false },
-    },
-    series: [
-      {
-        type: 'line',
-        data: [],
-        showSymbol: false,
-        lineStyle: { color: colorOk, width: 3 },
-        markArea: { silent: true, data: downBands, itemStyle: { color: colorDown, opacity: 0.18 } },
-        markLine: {
-          silent: true,
-          symbol: 'none',
-          label: { show: false },
-          lineStyle: { color: colorDown, width: 1, type: 'dashed' },
-          data: events
-            .filter((e) => e.end_time === null)
-            .map((e) => ({ xAxis: e.start_time })),
-        },
-      },
-    ],
-  }
-}
-
-export function buildSlaTimelineOption({ samples, startIso, endIso, colorOk = '#10b981', colorDown = '#ef4444' }) {
-  const bands = []
-  let runStart = null
-  let runState = null
-  for (const s of samples) {
-    if (s.reachable === runState) continue
-    if (runStart !== null) {
-      bands.push({ start: runStart, end: s.time, reachable: runState })
-    }
-    runStart = s.time
-    runState = s.reachable
-  }
-  if (runStart !== null) {
-    bands.push({ start: runStart, end: endIso, reachable: runState })
-  }
-
-  const markAreaData = []
-  for (const b of bands) {
-    if (b.end <= b.start) continue
-    const color = b.reachable ? colorOk : colorDown
-    markAreaData.push([
-      { xAxis: b.start, itemStyle: { color, opacity: b.reachable ? 0.10 : 0.28 } },
-      { xAxis: b.end, itemStyle: { color, opacity: 0 } },
-    ])
-  }
-
-  return {
-    animation: false,
-    grid: baseGrid(),
-    tooltip: {
-      ...baseTooltip(),
-      formatter(params) {
-        if (Array.isArray(params) && params.length === 2 && params[0].componentType === 'markArea') {
-          const [a, b] = params
-          return `${a.value}<br/>${a.value} → ${b.value}`
-        }
-        return ''
-      },
-    },
-    xAxis: {
-      type: 'time',
-      min: startIso,
-      max: endIso,
-      axisLine: { lineStyle: { color: AXIS_COLOR } },
-      axisLabel: { color: AXIS_COLOR, fontSize: 11 },
-      splitLine: { show: false },
-    },
-    yAxis: {
-      type: 'category',
-      data: ['DOWN', 'OK'],
-      axisLabel: { color: AXIS_COLOR, fontSize: 11 },
-      splitLine: { show: false },
-    },
-    series: [
-      {
-        type: 'line',
-        data: [],
-        showSymbol: false,
-        lineStyle: { color: colorOk, width: 3 },
-        markArea: { silent: true, data: markAreaData },
       },
     ],
   }

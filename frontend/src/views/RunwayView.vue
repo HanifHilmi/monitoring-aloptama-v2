@@ -1,9 +1,7 @@
 <script setup>
 import { api } from '@/api/client'
-import { buildOlaTimelineOption } from '@/utils/chart'
-import { fmtDuration, fmtTime, fmtUptime, statusColor } from '@/utils/format'
+import { fmtTime, statusColor } from '@/utils/format'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import EChart from '@/components/EChart.vue'
 import SensorCard from '@/components/SensorCard.vue'
 
 const props = defineProps({
@@ -11,9 +9,6 @@ const props = defineProps({
 })
 
 const overview = ref(null)
-const selectedSensor = ref(null)
-const olaEvents = ref([])
-const olaLoading = ref(false)
 const timer = ref(null)
 const range = ref('24h')  // unified time range for all sensor cards
 
@@ -23,24 +18,6 @@ const site = computed(() =>
 
 const sensors = computed(() => (site.value?.sensors || []).filter((s) => s.is_enabled !== false))
 
-const olaChartOption = computed(() => {
-  if (!site.value || !selectedSensor.value) return null
-  const end = new Date().toISOString()
-  const start = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString()
-  return buildOlaTimelineOption({
-    events: olaEvents.value,
-    startIso: start,
-    endIso: end,
-  })
-})
-
-const olaTotals = computed(() => {
-  const closed = olaEvents.value.filter((e) => e.end_time)
-  const open = olaEvents.value.filter((e) => !e.end_time)
-  const downtime = closed.reduce((acc, e) => acc + (e.duration_seconds || 0), 0)
-  return { events: closed.length, open: open.length, downtime }
-})
-
 async function loadOverview() {
   try {
     overview.value = await api.getStatusOverview()
@@ -49,25 +26,9 @@ async function loadOverview() {
   }
 }
 
-async function selectSensor(sensor) {
-  selectedSensor.value = sensor
-  olaLoading.value = true
-  olaEvents.value = []
-  try {
-    const data = await api.getDowntimeEvents('ola', props.siteSlug, sensor.code, 500)
-    olaEvents.value = data.events || []
-  } catch {
-    olaEvents.value = []
-  } finally {
-    olaLoading.value = false
-  }
-}
-
 watch(
   () => props.siteSlug,
   () => {
-    selectedSensor.value = null
-    olaEvents.value = []
     loadOverview()
   },
 )
@@ -129,28 +90,7 @@ onUnmounted(() => clearInterval(timer.value))
             :sensor="sensor"
             :site-slug="site.slug"
             :range="range"
-            @click="selectSensor(sensor)"
           />
-        </div>
-      </section>
-
-      <!-- OLA timeline for selected sensor -->
-      <section v-if="selectedSensor">
-        <h2 class="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-400">
-          OLA Timeline — {{ selectedSensor.code }} ({{ selectedSensor.name }}) · 30d
-        </h2>
-        <div class="panel">
-          <div v-if="olaLoading" class="flex h-[160px] items-center justify-center text-xs text-slate-500">
-            Loading OLA events…
-          </div>
-          <template v-else>
-            <EChart v-if="olaChartOption" :option="olaChartOption" height="160px" />
-            <div class="mt-2 flex justify-between text-xs text-slate-400">
-              <span>{{ olaTotals.events }} events</span>
-              <span>{{ olaTotals.open }} open</span>
-              <span>Downtime {{ fmtDuration(olaTotals.downtime) }}</span>
-            </div>
-          </template>
         </div>
       </section>
     </template>
