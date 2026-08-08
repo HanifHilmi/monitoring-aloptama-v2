@@ -67,23 +67,35 @@ class IngestionWorker:
 
     # ------------------------------------------------------------------
     async def _cdp_loop(self) -> None:
-        """Probe node connectivity and feed SLA state machine."""
+        """Probe node connectivity live (fast), persist to DB on a 1-min cadence.
+
+        Probes every ``cdps_check_interval_seconds`` (default 15s so the
+        dashboard shows near-instant online/offline), but only upserts a
+        ``cdp_connectivity`` row once per minute (aligned with /oneminute
+        backfill granularity) so SLA history stays 1-minute synced.
+        """
+        last_persist: Optional[datetime] = None
         while not self._stop.is_set():
             try:
                 async with AsyncSessionLocal() as session:
-                    await self._check_cdps(session)
+                    await self._check_cdps(session, persist=(
+                        last_persist is None
+                        or (datetime.now(timezone.utc) - last_persist).total_seconds() >= 60
+                    ))
+                    if last_persist is None or (datetime.now(timezone.utc) - last_persist).total_seconds() >= 60:
+                        last_persist = datetime.now(timezone.utc)
             except Exception:
                 logger.exception("CDP check loop error")
             await asyncio.sleep(settings.cdps_check_interval_seconds)
 
-    async def _check_cdps(self, session: AsyncSession) -> None:
+    async def _check_cdps(self, session: AsyncSession, persist: bool = True) -> None:
         nodes = (await session.execute(select(CdpNode))).scalars().all()
         if not nodes:
             return
-        # Probe ALL nodes exactly once, then persist + transition per node.
-        # (Previously check_all() was called inside the per-node loop, so a
-        # 2-node setup probed every node twice per interval.)
+        # Probe ALL nodes exactly once (fast, updates live state).
         await self.reader.check_all()
+        if not persist:
+            return
         ts = datetime.now(timezone.utc)
         for n in nodes:
             await self._persist_cdp_sample(session, n, ts)
@@ -97,7 +109,7 @@ class IngestionWorker:
             return
         reachable = state.reachable
 
-        # Persist connectivity sample
+        # Persist connectivity sample (1-minute cadence)
         await session.execute(
             insert(CdpConnectivity)
             .values(

@@ -40,8 +40,9 @@ class Settings(BaseSettings):
     # ---- Ingestion ----
     ingestion_interval_seconds: int = 60
     active_check_interval_seconds: int = 10
-    cdps_check_interval_seconds: int = 30
-    connectivity_timeout_seconds: float = 5.0
+    # Live CDP probe cadence: near-instant status for the dashboard.
+    cdps_check_interval_seconds: int = 15
+    connectivity_timeout_seconds: float = 3.0
     backfill_start: str = "2026-01-01T00:00:00Z"
     backfill_batch_days: int = 1
     # Backfill is triggered manually from the dashboard Settings -> Backfill
