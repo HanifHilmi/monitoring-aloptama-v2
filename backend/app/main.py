@@ -1,11 +1,16 @@
 """FastAPI application entrypoint.
 
 Boot sequence:
-1. Ensure migrations applied (docker-compose ``db-migrate`` handles this).
-2. If telemetry tables are empty, run the historical auto-backfill
-   (defaults to 2026-01-01 → now) so dashboards render immediately.
-3. Start the background ingestion worker (CDP active-passive probing,
-   telemetry ingestion, rollup rebuilds).
+1. Apply pending migrations (idempotent, owned by this process).
+2. Start serving HTTP immediately.
+
+Heavy work (historical backfill, CDP probing, telemetry ingestion, rollup
+rebuilds) runs exclusively in the dedicated ``worker`` container.  We
+deliberately do NOT start the ingestion worker in this process: the worker
+performs synchronous NFS/CDP file I/O (``Path.exists``, ``glob``,
+``read_text``) which would block the asyncio event loop and make every HTTP
+request (including ``/health``) hang — surfacing as 504 Gateway Timeouts at
+the proxy.
 """
 
 from __future__ import annotations
@@ -20,8 +25,6 @@ from app.api.router import api_router
 from app.core.config import settings
 from app.db.migrate import run_migrations
 from app.db.session import AsyncSessionLocal
-from app.ingestion.worker import build_worker
-from app.services.backfill import run_initial_backfill_if_needed
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,28 +35,24 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup/shutdown lifecycle."""
-    worker = None
+    """Startup/shutdown lifecycle.
+
+    Only migrations run here (brief, idempotent, advisory-lock guarded).
+    No ingestion/backfill/rollup work is started inline so the API is ready
+    to answer health checks as soon as uvicorn binds the socket.
+    """
     try:
-        # 1) Apply pending migrations (idempotent)
+        # Apply pending migrations (idempotent). The worker container runs
+        # with ENABLE_MIGRATIONS_ON_BOOT=false to avoid lock races on boot.
         if settings.enable_migrations_on_boot:
             async with AsyncSessionLocal() as session:
                 applied = await run_migrations(session)
                 if applied:
                     logger.info("Applied migrations: %s", ", ".join(applied))
 
-        # 2) Start the ingestion worker.
-        #    Historical backfill runs in the dedicated worker container before
-        #    ingestion starts — NOT inline here — so the API stays responsive
-        #    during the (potentially long) first-boot backfill.
-        async with AsyncSessionLocal() as session:
-            worker = await build_worker(session)
-        await worker.start()
         logger.info("Monitoring Aloptama V2 API started")
         yield
     finally:
-        if worker is not None:
-            await worker.stop()
         logger.info("Shutdown complete")
 
 

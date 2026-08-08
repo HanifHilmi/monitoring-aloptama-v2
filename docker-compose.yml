@@ -35,7 +35,10 @@ services:
       CDP1_MOUNT_PATH: ${CDP1_MOUNT_PATH:-/mnt/cdp1_logs/}
       CDP2_IP: ${CDP2_IP:-172.70.55.163}
       CDP2_MOUNT_PATH: ${CDP2_MOUNT_PATH:-/mnt/cdp2_logs/}
-      ENABLE_BACKFILL_ON_BOOT: ${ENABLE_BACKFILL_ON_BOOT:-true}
+      # The API process runs migrations once, then serves HTTP. It does NOT
+      # run backfill or the ingestion worker — those live in the dedicated
+      # worker container so the API event loop never blocks on NFS/CDP I/O.
+      ENABLE_BACKFILL_ON_BOOT: "false"
       ENABLE_MIGRATIONS_ON_BOOT: "true"
       ENVIRONMENT: ${ENVIRONMENT:-prod}
     volumes:
@@ -73,8 +76,12 @@ services:
       CDP1_MOUNT_PATH: ${CDP1_MOUNT_PATH:-/mnt/cdp1_logs/}
       CDP2_IP: ${CDP2_IP:-172.70.55.163}
       CDP2_MOUNT_PATH: ${CDP2_MOUNT_PATH:-/mnt/cdp2_logs/}
-      ENABLE_BACKFILL_ON_BOOT: ${ENABLE_BACKFILL_ON_BOOT:-true}
-      ENABLE_MIGRATIONS_ON_BOOT: "true"
+      # CRITICAL: keep migrations OFF in the worker. The backend owns schema
+      # migrations; running them from both processes causes advisory-lock /
+      # deadlock races on boot. Backfill is also performed by the worker's
+      # entrypoint explicitly (see worker-entrypoint.sh), never inline.
+      ENABLE_BACKFILL_ON_BOOT: "false"
+      ENABLE_MIGRATIONS_ON_BOOT: "false"
       ENVIRONMENT: ${ENVIRONMENT:-prod}
     volumes:
       - ${CDP1_MOUNT_PATH:-/mnt/cdp1_logs/}:/mnt/cdp1_logs
@@ -97,6 +104,15 @@ services:
       - backend
     expose:
       - "80"
+    labels:
+      # Pin Traefik to the Coolify resource network so the Docker provider
+      # uses the reachable ingress IP. Without this, the frontend's extra
+      # compose network (monitoring-net) makes Traefik pick an unreachable
+      # endpoint -> connection hang -> 504 Gateway Timeout.
+      # NOTE: c7pv8707qeyc5vp23nzqgrsh is this app's stable Coolify resource
+      # UUID (COOLIFY_RESOURCE_UUID). If the resource is recreated, update it.
+      - "traefik.enable=true"
+      - "traefik.docker.network=c7pv8707qeyc5vp23nzqgrsh"
     networks:
       - monitoring-net
 

@@ -77,19 +77,25 @@ class IngestionWorker:
             await asyncio.sleep(settings.cdps_check_interval_seconds)
 
     async def _check_cdps(self, session: AsyncSession) -> None:
-        nodes = await session.execute(select(CdpNode))
-        for n in nodes.scalars():
-            await self._check_one_cdp(session, n)
+        nodes = (await session.execute(select(CdpNode))).scalars().all()
+        if not nodes:
+            return
+        # Probe ALL nodes exactly once, then persist + transition per node.
+        # (Previously check_all() was called inside the per-node loop, so a
+        # 2-node setup probed every node twice per interval.)
+        await self.reader.check_all()
+        ts = datetime.now(timezone.utc)
+        for n in nodes:
+            await self._persist_cdp_sample(session, n, ts)
         await session.commit()
 
-    async def _check_one_cdp(self, session: AsyncSession, node: CdpNode) -> None:
-        # Refresh runtime state
+    async def _persist_cdp_sample(
+        self, session: AsyncSession, node: CdpNode, ts: datetime
+    ) -> None:
         state = self.reader.state.nodes.get(node.name)
         if state is None:
             return
-        await self.reader.check_all()
         reachable = state.reachable
-        ts = datetime.now(timezone.utc)
 
         # Persist connectivity sample
         await session.execute(

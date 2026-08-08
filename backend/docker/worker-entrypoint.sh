@@ -1,6 +1,10 @@
 #!/bin/sh
 set -e
 
+# Read env flags. Coolify / compose may inject these as "true"/"false".
+ENABLE_MIGRATIONS_ON_BOOT="${ENABLE_MIGRATIONS_ON_BOOT:-false}"
+ENABLE_BACKFILL_ON_BOOT="${ENABLE_BACKFILL_ON_BOOT:-false}"
+
 echo "[worker] Waiting for database..."
 python - <<'PY'
 import asyncio, sys
@@ -22,8 +26,12 @@ async def wait():
 asyncio.run(wait())
 PY
 
-echo "[worker] Running migrations..."
-python - <<'PY'
+# Migrations are owned by the backend (API) process. Running them here too
+# causes advisory-lock / deadlock races on boot, so we only apply them when
+# explicitly enabled (single-service local setups).
+if [ "$ENABLE_MIGRATIONS_ON_BOOT" = "true" ]; then
+    echo "[worker] Running migrations..."
+    python - <<'PY'
 import asyncio
 from app.db.migrate import run_migrations
 
@@ -33,9 +41,17 @@ async def main():
 
 asyncio.run(main())
 PY
+else
+    echo "[worker] ENABLE_MIGRATIONS_ON_BOOT=false -> skipping migrations (backend owns schema)."
+fi
 
-echo "[worker] Checking initial backfill..."
-python - <<'PY'
+# Historical backfill is gated by ENABLE_BACKFILL_ON_BOOT. In the normal
+# Coolify deployment this flag is "false" because backfill already ran on
+# first boot; keeping it opt-in avoids re-running a multi-hour backfill on
+# every worker restart.
+if [ "$ENABLE_BACKFILL_ON_BOOT" = "true" ]; then
+    echo "[worker] Checking initial backfill..."
+    python - <<'PY'
 import asyncio
 from app.db.session import AsyncSessionLocal
 from app.db.migrate import is_database_initialized
@@ -52,6 +68,9 @@ async def main():
 
 asyncio.run(main())
 PY
+else
+    echo "[worker] ENABLE_BACKFILL_ON_BOOT=false -> skipping backfill."
+fi
 
 echo "[worker] Starting ingestion worker..."
 exec python -m app.ingestion.worker
