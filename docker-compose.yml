@@ -86,8 +86,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      # Start the worker only after the backend finished RESET_DB_ON_BOOT +
+      # migrations (the /health liveness probe passes after the lifespan).
       backend:
-        condition: service_started
+        condition: service_healthy
     networks:
       - monitoring-net
 

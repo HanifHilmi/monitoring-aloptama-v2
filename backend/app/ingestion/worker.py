@@ -271,7 +271,17 @@ class IngestionWorker:
 
 async def build_worker(session: AsyncSession) -> IngestionWorker:
     """Create a worker wired to the configured CDP nodes."""
-    nodes = (await session.execute(select(CdpNode))).scalars().all()
+    # Wait for the schema to exist — the backend may still be applying a
+    # RESET_DB_ON_BOOT (drop public schema) when this container starts.
+    for attempt in range(60):
+        try:
+            nodes = (await session.execute(select(CdpNode))).scalars().all()
+            break
+        except Exception:
+            if attempt == 59:
+                raise
+            await asyncio.sleep(2)
+            await session.rollback()
     node_dicts = [
         {
             "id": n.id,
