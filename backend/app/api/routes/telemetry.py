@@ -87,6 +87,14 @@ async def get_sensor_telemetry(
         if r.time and r.status
     ]
 
+    series = [
+        {
+            "time": datetime.fromtimestamp(t0 + x, tz=timezone.utc),
+            "value": y,
+        }
+        for x, y in sampled
+    ]
+
     return {
         "site": {"slug": site.slug, "code": site.code, "name": site.name},
         "sensor": {
@@ -99,13 +107,10 @@ async def get_sensor_telemetry(
         "range": range,
         "points": len(rows),
         "downsampled_to": len(sampled),
-        "series": [
-            {
-                "time": datetime.fromtimestamp(t0 + x, tz=timezone.utc),
-                "value": y,
-            }
-            for x, y in sampled
-        ],
+        "series": series,
+        # `samples` is the contract the frontend SensorCard consumes:
+        # [{time, value}, ...]
+        "samples": series,
         "status": status_pairs,
         "downsample_enabled": len(rows) > threshold,
     }

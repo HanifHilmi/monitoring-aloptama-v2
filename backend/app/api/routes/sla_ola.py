@@ -147,6 +147,35 @@ async def get_sla_ola_summary(
              "sensors": []},
         )["sensors"].append(entry)
 
+    # Unify SLA + OLA into a single `rows` list matching the frontend
+    # contract (scope, entity_type, entity_id, entity, uptime_pct, ...).
+    rows = []
+    for cdp in sla_summary:
+        rows.append(
+            {
+                "scope": "sla",
+                "entity_type": "cdp_node",
+                "entity_id": cdp["cdp_id"],
+                "entity": cdp["name"],
+                "uptime_pct": cdp["uptime_pct"],
+                "downtime_seconds": cdp["downtime_seconds"],
+                "days_with_data": cdp["days_with_data"],
+            }
+        )
+    for site_block in [v for k, v in sorted(sites_payload.items())]:
+        for s in site_block["sensors"]:
+            rows.append(
+                {
+                    "scope": "ola",
+                    "entity_type": "sensor",
+                    "entity_id": s["sensor_id"],
+                    "entity": f'{site_block["site"]["name"]} / {s["code"]}',
+                    "uptime_pct": s["uptime_pct"],
+                    "downtime_seconds": s["downtime_seconds"],
+                    "days_with_data": s["days_with_data"],
+                }
+            )
+
     return {
         "generated_at": datetime.now(timezone.utc),
         "range": range,
@@ -154,6 +183,7 @@ async def get_sla_ola_summary(
         "end_date": end_date,
         "sla": sla_summary,
         "ola": [v for k, v in sorted(sites_payload.items())],
+        "rows": rows,
     }
 
 
@@ -182,24 +212,28 @@ async def get_daily_rollup(
     stmt = stmt.order_by(DailySlaOla.weo_time)
 
     rows = (await db.execute(stmt)).scalars().all()
+    daily = [
+        {
+            "day": r.weo_time,
+            "date": r.weo_time,
+            "total_seconds": r.total_seconds,
+            "uptime_seconds": r.uptime_seconds,
+            "downtime_seconds": r.downtime_seconds,
+            "uptime_pct": r.uptime_pct,
+            "open_events": r.open_events,
+            "closed_events": r.closed_events,
+        }
+        for r in rows
+    ]
     return {
         "scope": scope,
         "entity_type": entity_type,
         "entity_id": entity_id,
         "start_date": start_date,
         "end_date": end_date,
-        "daily": [
-            {
-                "date": r.weo_time,
-                "total_seconds": r.total_seconds,
-                "uptime_seconds": r.uptime_seconds,
-                "downtime_seconds": r.downtime_seconds,
-                "uptime_pct": r.uptime_pct,
-                "open_events": r.open_events,
-                "closed_events": r.closed_events,
-            }
-            for r in rows
-        ],
+        "daily": daily,
+        # Frontend SlaOlaView reads `data.rows`; expose the same list.
+        "rows": daily,
     }
 
 

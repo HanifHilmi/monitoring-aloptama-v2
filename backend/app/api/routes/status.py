@@ -49,13 +49,18 @@ async def get_status_overview(
                 "id": n.id,
                 "name": n.name,
                 "ip_address": str(n.ip_address),
+                "ip": str(n.ip_address),  # frontend DashboardView contract
                 "role": n.role,
                 "status": (
                     "online" if latest and latest.reachable else "offline"
                 ),
                 "last_check": latest.time if latest else None,
+                "last_seen": latest.time if latest else None,  # frontend contract
                 "last_rtt_ms": latest.rtt_ms if latest else None,
                 "error_message": latest.error_message if latest else None,
+                # Frontend CDP card shows Uptime %; derived from latest
+                # connectivity reachability for display.
+                "uptime_pct": 100.0 if latest and latest.reachable else 0.0,
             }
         )
 
