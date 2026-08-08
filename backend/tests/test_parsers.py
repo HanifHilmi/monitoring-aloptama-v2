@@ -1,98 +1,67 @@
-"""Tests for the 1-minute + raw-DCP log parsers (with fallback)."""
+"""Tests for the WIDN multi-metric parser."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
 
-import pytest
-
 from app.ingestion.parsers import (
+    SENSOR_METRICS,
     coerce_value,
     parse_one_minute_file,
-    parse_raw_dcp_file,
     parse_site_batch,
     parse_timestamp_from_filename,
 )
 
 
-def test_parse_one_minute_ok(one_minute_file: Path) -> None:
-    specs = {
-        "ATRH": {"position": 1},
-        "BARO": {"position": 2},
-        "WIND": {"position": 3},
+def specs(station: str = "04") -> dict:
+    return {
+        code: {"sensor_id": i + 1, "station": station}
+        for i, code in enumerate(SENSOR_METRICS)
     }
-    records = parse_one_minute_file(one_minute_file, specs)
+
+
+def test_parse_widn_metrics(widn_file: Path) -> None:
+    records = parse_one_minute_file(widn_file, specs())
     assert len(records) == 2
-    r = records[0]
-    by_code = {s.sensor_code: s for s in r.samples}
-    assert by_code["ATRH"].value == 25.4
-    assert by_code["ATRH"].status == "ok"
-    assert by_code["BARO"].value == 1013.25
-    assert by_code["WIND"].value == 12.3
+    # 091 20260101 00 00 row: TEMP=253, QNH=10108, WS=5, WGS invalid
+    by_code: dict[str, dict] = {}
+    for m in records[0].metrics:
+        by_code[(m.sensor_code, m.metric)] = m
+    assert by_code[("ATRH", "TEMP")].value == 253.0
+    assert by_code[("ATRH", "RH")].value == 90.0
+    assert by_code[("BARO", "QNH")].value == 10108.0
+    assert by_code[("ANEM", "WS")].value == 5.0
+    assert by_code[("ANEM", "WD")].value == 165.0
+    assert by_code[("ANEM", "WGS")].is_valid is False
+    assert by_code[("CEL", "LR1")].value == 5.0
+    assert by_code[("ALS", "ALS_INT")].value == 1047.0
+    assert by_code[("PWX", "VIS")].value == 13459.0
 
 
-def test_parse_one_minute_missing_position(one_minute_file: Path) -> None:
-    specs = {"CEIL": {"position": 99}}
-    records = parse_one_minute_file(one_minute_file, specs)
-    assert records
-    assert records[0].samples[0].status == "missing"
-    assert records[0].samples[0].value is None
+def test_parse_widn_station22(widn_file: Path) -> None:
+    records = parse_one_minute_file(widn_file, specs(station="22"))
+    by_code: dict[str, dict] = {}
+    for m in records[0].metrics:
+        by_code[(m.sensor_code, m.metric)] = m
+    # Row: 253 235 90 | 251 236 92 | 249 233 90 maps to 04 | M | 22
+    assert by_code[("ATRH", "TEMP")].value == 249.0  # station 22 block
+    assert by_code[("ANEM", "WS")].value == 3.0  # 04=5, M=2, 22=3
+    assert by_code[("BARO", "QNH")].value == 10108.0
 
 
-def test_parse_one_minute_corrupt(tmp_path: Path) -> None:
-    path = tmp_path / "RWYA202601010000.OneMinute.dat"
-    path.write_text("2026-01-01 00:00:00 bad 1013.25\n", encoding="utf-8")
-    records = parse_one_minute_file(path, {"ATRH": {"position": 1}})
-    assert records[0].samples[0].status == "corrupt"
-    assert records[0].samples[0].value is None
-
-
-def test_parse_raw_dcp_slicing(raw_dcp_file: Path) -> None:
-    specs = {
-        "ATRH": {"fallback_slice": "20:30"},
-        "BARO": {"fallback_slice": "30:40"},
-        "WIND": {"fallback_slice": "40:50"},
-    }
-    records = parse_raw_dcp_file(raw_dcp_file, specs)
-    assert len(records) == 2
-    r = records[0]
-    by_code = {s.sensor_code: s for s in r.samples}
-    assert by_code["ATRH"].value == 25.4
-    assert by_code["BARO"].value == 1013.25
-    assert by_code["WIND"].value == 12.3
-    assert by_code["ATRH"].status == "ok"
-
-
-def test_parse_site_batch_fallback(
-    tmp_path: Path, one_minute_file: Path, raw_dcp_file: Path
-) -> None:
-    # Corrupt the 1-minute field, raw DCP has the valid value
-    one_minute_file.write_text(
-        "2026-01-01 00:00:00 BAD 1013.25 12.3\n", encoding="utf-8"
-    )
-    specs = {"ATRH": {"position": 1, "fallback_slice": "20:30"}}
-    result = parse_site_batch(one_minute_file, raw_dcp_file, specs)
-    samples = result["ATRH"]
-    assert samples[0].value == 25.4  # recovered from raw DCP
-    assert samples[0].status == "ok"
-
-
-def test_parse_site_batch_no_one_minute_file(
-    tmp_path: Path, raw_dcp_file: Path
-) -> None:
-    missing = tmp_path / "DOESNOTEXIST.OneMinute.dat"
-    specs = {"ATRH": {"position": 1, "fallback_slice": "20:30"}}
-    result = parse_site_batch(missing, raw_dcp_file, specs)
-    samples = result.get("ATRH", [])
-    assert len(samples) == 2
-    assert samples[0].value == 25.4
-    assert samples[0].status == "ok"
+def test_parse_site_batch(widn_file: Path) -> None:
+    result = parse_site_batch(widn_file, widn_file, specs())
+    assert "ATRH" in result
+    atrh = result["ATRH"]
+    by_metric = {m.metric: m for m in atrh}
+    assert len(by_metric) == 3  # TEMP / DEWP / RH
+    assert by_metric["TEMP"].value == 253.0
 
 
 def test_parse_timestamp_from_filename() -> None:
-    ts = parse_timestamp_from_filename("DCPA202601010030.OneMinute.dat")
-    assert ts == datetime(2026, 1, 1, 0, 30, tzinfo=timezone.utc)
+    ts = parse_timestamp_from_filename("091OneMinute.20260101.dat")
+    assert ts == datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
 def test_parse_timestamp_invalid() -> None:
@@ -103,4 +72,7 @@ def test_coerce_value() -> None:
     assert coerce_value("25.4") == 25.4
     assert coerce_value("  ") is None
     assert coerce_value("N/A") is None
-    assert coerce_value("1,5") == 1.5  # comma decimal
+    assert coerce_value("1,5") == 1.5
+    assert coerce_value("///") is None
+    assert coerce_value("MMMM") is None
+    assert coerce_value("D") is None  # string day/night flag

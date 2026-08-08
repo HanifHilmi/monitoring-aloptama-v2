@@ -1,8 +1,8 @@
-"""Telemetry time-series endpoint with LTTB downsampling.
+"""Telemetry time-series endpoint (WIDN multi-metric, typed).
 
 Queries the ``telemetry`` hypertable for a sensor within a time range,
-then applies LTTB in-process to keep chart payloads small and rendering
-non-blocking (>1000 points get downsampled to the configured threshold).
+optionally filtered by metric, then applies LTTB to numeric series.
+String metrics (PW, SKY, D/N, LTX) are returned as text samples.
 """
 
 from __future__ import annotations
@@ -35,15 +35,18 @@ async def get_sensor_telemetry(
     site_slug: str,
     sensor_code: str,
     range: str = Query("24h", pattern="^(1h|6h|24h|7d|30d)$"),
+    metric: str | None = Query(default=None),
     downsample: int = Query(
-        default=None,
-        ge=10,
-        le=10000,
-        description="Max points after LTTB. Defaults to configured threshold.",
+        default=None, ge=10, le=10000,
+        description="Max points after LTTB for numeric series.",
     ),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Fetch one sensor's time-series for a site over a time range."""
+    """Fetch one sensor's typed time-series for a site over a range.
+
+    When a numeric metric is selected, `series` is LTTB-downsampled. All
+    rows (numeric + text) are returned in `samples` with `is_valid`.
+    """
     range_delta = RANGE_OPTIONS.get(range)
     if range_delta is None:
         raise HTTPException(status_code=422, detail="invalid range")
@@ -63,35 +66,44 @@ async def get_sensor_telemetry(
         raise HTTPException(status_code=404, detail="sensor disabled")
 
     since = datetime.now(timezone.utc) - range_delta
-    rows = (
-        await db.execute(
-            select(Telemetry)
-            .where(
-                Telemetry.sensor_id == sensor.id,
-                Telemetry.time >= since,
-            )
-            .order_by(Telemetry.time.asc())
-        )
-    ).scalars().all()
+    stmt = select(Telemetry).where(
+        Telemetry.sensor_id == sensor.id,
+        Telemetry.time >= since,
+    )
+    if metric:
+        stmt = stmt.where(Telemetry.metric == metric)
+    stmt = stmt.order_by(Telemetry.time.asc())
+    rows = (await db.execute(stmt)).scalars().all()
 
-    pairs = [(r.time, r.value) for r in rows if r.value is not None]
-    threshold = downsample or settings.lttb_default_threshold
-    # Output x is epoch offset from first sample; convert back to ISO timestamps
-    t0 = pairs[0][0].timestamp() if pairs else 0.0
-    sampled = downsample_series(pairs, threshold)
+    # Determine available metrics (for chart-type-aware frontend).
+    metrics = sorted({r.metric for r in rows})
+    # Pick the requested metric or the first numeric one present / 'value'.
+    selected = (
+        metric
+        or next((m for m in metrics if m in {"TEMP", "WS", "QNH", "RVR", "VIS", "SOL", "RA", "LR1", "ALS_INT"}),
+                None)
+        or (metrics[0] if metrics else "value")
+    )
 
-    # Status timeline: compressed (time, status) pairs for OLA state grids
-    status_pairs = [
-        {"time": r.time, "status": r.status}
+    samples = [
+        {
+            "time": r.time,
+            "value": r.value,
+            "text_value": r.text_value,
+            "is_valid": r.is_valid,
+            "status": r.status,
+        }
         for r in rows
-        if r.time and r.status
+        if r.metric == selected
     ]
 
+    pairs = [(s["time"], s["value"]) for s in samples if s["value"] is not None]
+    threshold = downsample or settings.lttb_default_threshold
+    t0 = pairs[0][0].timestamp() if pairs else 0.0
+    sampled = downsample_series(pairs, threshold) if pairs else []
+
     series = [
-        {
-            "time": datetime.fromtimestamp(t0 + x, tz=timezone.utc),
-            "value": y,
-        }
+        {"time": datetime.fromtimestamp(t0 + x, tz=timezone.utc), "value": y}
         for x, y in sampled
     ]
 
@@ -103,14 +115,15 @@ async def get_sensor_telemetry(
             "name": sensor.name,
             "category": sensor.category,
             "unit": sensor.unit,
+            "symbol": sensor.symbol,
+            "station": sensor.station,
         },
         "range": range,
-        "points": len(rows),
-        "downsampled_to": len(sampled),
+        "metric": selected,
+        "metrics": metrics,
+        "points": len(samples),
+        "downsampled_to": len(series),
         "series": series,
-        # `samples` is the contract the frontend SensorCard consumes:
-        # [{time, value}, ...]
-        "samples": series,
-        "status": status_pairs,
-        "downsample_enabled": len(rows) > threshold,
+        "samples": samples,  # frontend SensorCard contract
+        "downsample_enabled": len(pairs) > threshold,
     }

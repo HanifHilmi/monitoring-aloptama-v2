@@ -154,15 +154,13 @@ class IngestionWorker:
         sensors: list[Sensor],
         ts: datetime,
     ) -> None:
-        # Build unified sensor specs (position for 1-min, fallback_slice for raw,
-        # WIDN symbol/station for auto column mapping)
+        # Build unified sensor specs (WIDN symbol/station for column mapping)
         specs: dict[str, dict] = {}
+        sensor_nodes: dict[str, Sensor] = {}
         for s in sensors:
             if not s.is_enabled:
                 continue
             entry: dict = {"sensor_id": s.id}
-            if s.position:
-                entry["position"] = s.position
             if s.fallback_slice:
                 entry["fallback_slice"] = s.fallback_slice
             if s.symbol:
@@ -170,6 +168,7 @@ class IngestionWorker:
             if s.station:
                 entry["station"] = s.station
             specs[s.code] = entry
+            sensor_nodes[s.code] = s
 
         # Try each file prefix for the site until one parses
         for prefix in site.file_prefixes or []:
@@ -184,7 +183,7 @@ class IngestionWorker:
                 continue
 
             # Persist telemetry + OLA transitions
-            await self._persist_site_samples(session, site, sensors, parsed, ts)
+            await self._persist_site_samples(session, site, sensor_nodes, parsed, ts)
             logger.debug(
                 "Site %s minute %s: %d sensors parsed", site.code, ts, len(parsed)
             )
@@ -195,18 +194,19 @@ class IngestionWorker:
         self,
         session: AsyncSession,
         site: Site,
-        sensors: list[Sensor],
+        sensor_nodes: dict[str, Sensor],
         parsed_by_code: dict,
         ts: datetime,
     ) -> None:
-        sensor_by_code = {s.code: s for s in sensors}
-        for code, samples in parsed_by_code.items():
-            sensor = sensor_by_code.get(code)
-            if sensor is None or not samples:
+        for code, metrics in parsed_by_code.items():
+            sensor = sensor_nodes.get(code)
+            if sensor is None or not metrics:
                 continue
-            sample = samples[-1]  # single latest sample per minute
-            is_down = sample.status != "ok"
-            reason = sample.status if is_down else "ok"
+            # A sensor is UP (OLA) for the minute if any metric is valid.
+            valid_count = sum(1 for m in metrics if m.is_valid)
+            total_count = len(metrics)
+            is_down = valid_count == 0
+            reason = "missing" if is_down else "ok"
 
             # OLA state machine
             await transition_ola(
@@ -219,25 +219,31 @@ class IngestionWorker:
                 reason=reason,
             )
 
-            # Upsert telemetry
-            await session.execute(
-                insert(Telemetry)
-                .values(
-                    time=ts,
-                    sensor_id=sensor.id,
-                    value=sample.value,
-                    status=sample.status,
-                    raw_line=sample.raw or None,
+            # Upsert telemetry — one row per metric (WIDN multi-metric).
+            for m in metrics:
+                await session.execute(
+                    insert(Telemetry)
+                    .values(
+                        time=ts,
+                        sensor_id=sensor.id,
+                        metric=m.metric,
+                        value=m.value,
+                        text_value=m.text_value,
+                        status="ok" if m.is_valid else "invalid",
+                        is_valid=m.is_valid,
+                        raw_line=m.raw or None,
+                    )
+                    .on_conflict_do_update(
+                        index_elements=["time", "sensor_id", "metric"],
+                        set_={
+                            "value": m.value,
+                            "text_value": m.text_value,
+                            "status": "ok" if m.is_valid else "invalid",
+                            "is_valid": m.is_valid,
+                            "raw_line": m.raw or None,
+                        },
+                    )
                 )
-                .on_conflict_do_update(
-                    index_elements=["time", "sensor_id"],
-                    set_={
-                        "value": sample.value,
-                        "status": sample.status,
-                        "raw_line": sample.raw or None,
-                    },
-                )
-            )
 
     # ------------------------------------------------------------------
     async def _rollup_loop(self) -> None:

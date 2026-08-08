@@ -1,15 +1,16 @@
-"""Initial auto-backfill service.
+"""Initial auto-backfill service (WIDN multi-metric).
 
 On first boot (when telemetry tables are uninitialized/empty), this service
 runs a historical backfill starting from ``settings.backfill_start``
 (2026-01-01 by default) so dashboards render immediately.
 
-Backfill flow:
-1. Detect empty state (no telemetry + no connectivity samples).
-2. Step forward from the configured start date to ``now`` in day chunks.
-3. For each chunk, resolve the 1-minute log files and parse with raw-DCP
-   fallback, feeding the same state machine transitions as live ingestion.
-4. Rebuild the daily SLA/OLA rollup for the full backfill range.
+Semantics:
+- SLA  = availability of the CDP oneminute file for the minute
+         (file present + parseable => UP; missing/unreadable => DOWN).
+- OLA  = availability % of valid sensor data (valid metrics / expected
+         metrics for the sensor at that minute).
+- Telemetry is stored one row per (minute, sensor, metric) with both
+  float (value) and string (text_value) payloads.
 """
 
 from __future__ import annotations
@@ -65,10 +66,7 @@ async def run_initial_backfill_if_needed(
     *,
     force: bool = False,
 ) -> bool:
-    """Run the historical backfill when the database is empty (or forced).
-
-    Returns True when a backfill ran.
-    """
+    """Run the historical backfill when the database is empty (or forced)."""
     if not force and not await is_database_uninitialized(session):
         logger.info("Database already initialized — skipping backfill")
         return False
@@ -92,8 +90,7 @@ async def _run_backfill(
     start: datetime,
     end: datetime,
 ) -> None:
-    """Iterate hour-by-hour over the range, ingest, and feed state machines."""
-    # Build runtime reader + state machine from master data
+    """Iterate day-by-day over the range, ingest, and feed state machines."""
     nodes = (await session.execute(select(CdpNode))).scalars().all()
     node_dicts = [
         {
@@ -119,7 +116,6 @@ async def _run_backfill(
         await session.commit()
         logger.info("Backfill progress: %s .. %s", cursor, chunk_end)
         cursor = chunk_end
-        # Yield to allow other coroutines to make progress on huge ranges
         await asyncio.sleep(0)
 
 
@@ -132,20 +128,10 @@ async def _backfill_chunk(
     start: datetime,
     end: datetime,
 ) -> None:
-    """Ingest every minute in [start, end) for all sites with SLA/OLA."""
-    # Refresh node reachability once per chunk
-    await reader.check_all()
-
+    """Ingest every minute in [start, end) for all sites."""
     sensors_by_site: dict[int, list[Sensor]] = {}
     for s in sensors:
         sensors_by_site.setdefault(s.site_id, []).append(s)
-
-    # SLA: transition CDP nodes from current reachability as of `start`
-    for node in nodes_from_state(reader):
-        await transition_sla(
-            session, sm, cdp_id=node.cdp_id, site_id=None,
-            reachable=node.reachable, ts=start,
-        )
 
     minute = start
     while minute < end:
@@ -161,19 +147,19 @@ async def _ingest_minute(
     sensors_by_site: dict[int, list[Sensor]],
     ts: datetime,
 ) -> None:
+    minute_ts = ts.replace(second=0, microsecond=0)
     for site in sites:
         site_sensors = sensors_by_site.get(site.id, [])
         if not site_sensors:
             continue
 
-        # Build unified sensor specs (position for 1-min, fallback_slice for raw)
+        # Build sensor specs with WIDN symbol/station mapping.
         specs: dict[str, dict] = {}
+        sensor_nodes: dict[str, Sensor] = {}
         for s in site_sensors:
             if not s.is_enabled:
                 continue
             entry: dict = {"sensor_id": s.id}
-            if s.position:
-                entry["position"] = s.position
             if s.fallback_slice:
                 entry["fallback_slice"] = s.fallback_slice
             if s.symbol:
@@ -181,55 +167,64 @@ async def _ingest_minute(
             if s.station:
                 entry["station"] = s.station
             specs[s.code] = entry
+            sensor_nodes[s.code] = s
 
-        # Try each site file prefix
+        # Try each site file prefix. SLA = file exists and parsed.
         parsed_batch: dict = {}
         for prefix in site.file_prefixes or []:
-            one_min_path = reader.resolve_site_file(prefix, ts)
-            raw_path = reader.resolve_raw_sensor_file(prefix, ts)
+            one_min_path = reader.resolve_site_file(prefix, minute_ts)
+            raw_path = reader.resolve_raw_sensor_file(prefix, minute_ts)
             if one_min_path is None or raw_path is None:
                 continue
-            default_ts = parse_timestamp_from_filename(one_min_path.name) or ts
+            default_ts = parse_timestamp_from_filename(one_min_path.name) or minute_ts
             parsed_batch = parse_site_batch(one_min_path, raw_path, specs, default_ts)
             if parsed_batch:
                 break
 
+        # SLA: file availability per CDP node. Both nodes share the connect
+        # status in the SLA view; use the active reader's reachability plus
+        # whether a file was actually read.
+        file_up = bool(parsed_batch)
+        for node in reader.state.nodes.values():
+            await transition_sla(
+                session, sm, cdp_id=node.cdp_id, site_id=site.id,
+                reachable=file_up, ts=minute_ts,
+            )
+
         if not parsed_batch:
             continue
 
-        sensor_by_code = {s.code: s for s in site_sensors}
-        for code, samples in parsed_batch.items():
-            sensor = sensor_by_code.get(code)
-            if sensor is None or not samples:
+        # Persist telemetry + OLA availability per sensor.
+        for code, metrics in parsed_batch.items():
+            sensor = sensor_nodes.get(code)
+            if sensor is None or not metrics:
                 continue
-            sample = samples[-1]
-            is_down = sample.status != "ok"
-            reason = sample.status if is_down else "ok"
-
+            valid_count = sum(1 for m in metrics if m.is_valid)
+            is_down = valid_count == 0
             await transition_ola(
                 session, sm, sensor_id=sensor.id, site_id=site.id,
-                is_down=is_down, ts=ts, reason=reason,
+                is_down=is_down, ts=minute_ts,
+                reason="missing" if is_down else "ok",
             )
-
-            # Upsert telemetry for this minute
-            await session.execute(
-                insert(Telemetry)
-                .values(
-                    time=ts, sensor_id=sensor.id,
-                    value=sample.value, status=sample.status,
-                    raw_line=sample.raw or None,
+            for m in metrics:
+                await session.execute(
+                    insert(Telemetry)
+                    .values(
+                        time=minute_ts, sensor_id=sensor.id,
+                        metric=m.metric, value=m.value,
+                        text_value=m.text_value,
+                        status="ok" if m.is_valid else "invalid",
+                        is_valid=m.is_valid,
+                        raw_line=m.raw or None,
+                    )
+                    .on_conflict_do_update(
+                        index_elements=["time", "sensor_id", "metric"],
+                        set_={
+                            "value": m.value,
+                            "text_value": m.text_value,
+                            "status": "ok" if m.is_valid else "invalid",
+                            "is_valid": m.is_valid,
+                            "raw_line": m.raw or None,
+                        },
+                    )
                 )
-                .on_conflict_do_update(
-                    index_elements=["time", "sensor_id"],
-                    set_={
-                        "value": sample.value,
-                        "status": sample.status,
-                        "raw_line": sample.raw or None,
-                    },
-                )
-            )
-
-
-def nodes_from_state(reader: CdpReader) -> list:
-    """Expose the reader's live node states as lightweight objects."""
-    return list(reader.state.nodes.values())

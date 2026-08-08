@@ -1,0 +1,6 @@
+CRITICAL INSTRUCTION FOR DEEPSEEK MODEL:
+You are prone to injecting stray artifacts (like </ | | DSML | | >) when using the `replace_in_file` tool, which breaks the required 'diff' parameter and causes infinite retry loops.
+
+To prevent this:
+1. NEVER output stray markdown or XML-like tags inside tool parameters.
+2. If you need to edit a file and `replace_in_file` keeps failing with artifact errors, DO NOT keep retrying it. Instead, read the file and use the `write_to_file` tool to overwrite the entire file with the updated content.
