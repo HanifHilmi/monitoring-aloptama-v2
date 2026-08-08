@@ -74,7 +74,11 @@ def test_resolve_raw_sensor_file_on_active() -> None:
     ts = datetime(2026, 1, 1, 0, 30, tzinfo=timezone.utc)
     path = reader.resolve_raw_sensor_file("RWYA", ts)
     assert path is not None
-    assert str(path).endswith("/mnt/cdp1_logs/sensor/RWYA.DCP.2026010100.dat")
+    # Raw /sensor/ files are not used; the raw resolver returns the
+    # oneminute WIDN file (the sole data source). It may be the universal
+    # station file 091OneMinute.20260101.dat when the mount is present.
+    assert str(path).startswith("/mnt/cdp1_logs/oneminute/")
+    assert path.name.endswith("OneMinute.20260101.dat")
 
 
 def test_resolve_after_failover_uses_new_active() -> None:

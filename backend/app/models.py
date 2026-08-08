@@ -68,6 +68,7 @@ class Sensor(Base):
     fallback_slice: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     symbol: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     station: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    component: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))

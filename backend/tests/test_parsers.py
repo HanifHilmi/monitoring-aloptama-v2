@@ -28,9 +28,11 @@ def test_parse_widn_metrics(widn_file: Path) -> None:
     by_code: dict[str, dict] = {}
     for m in records[0].metrics:
         by_code[(m.sensor_code, m.metric)] = m
-    assert by_code[("ATRH", "TEMP")].value == 253.0
+    # TEMP/DEWP/QNH are transmitted with a trailing digit; `scale` divides.
+    assert by_code[("ATRH", "TEMP")].value == 25.3
+    assert by_code[("ATRH", "DEWP")].value == 23.5
     assert by_code[("ATRH", "RH")].value == 90.0
-    assert by_code[("BARO", "QNH")].value == 10108.0
+    assert by_code[("BARO", "QNH")].value == 1010.8
     assert by_code[("ANEM", "WS")].value == 5.0
     assert by_code[("ANEM", "WD")].value == 165.0
     assert by_code[("ANEM", "WGS")].is_valid is False
@@ -45,9 +47,9 @@ def test_parse_widn_station22(widn_file: Path) -> None:
     for m in records[0].metrics:
         by_code[(m.sensor_code, m.metric)] = m
     # Row: 253 235 90 | 251 236 92 | 249 233 90 maps to 04 | M | 22
-    assert by_code[("ATRH", "TEMP")].value == 249.0  # station 22 block
+    assert by_code[("ATRH", "TEMP")].value == 24.9  # station 22 block, ÷10
     assert by_code[("ANEM", "WS")].value == 3.0  # 04=5, M=2, 22=3
-    assert by_code[("BARO", "QNH")].value == 10108.0
+    assert by_code[("BARO", "QNH")].value == 1010.8
 
 
 def test_parse_site_batch(widn_file: Path) -> None:
@@ -56,7 +58,7 @@ def test_parse_site_batch(widn_file: Path) -> None:
     atrh = result["ATRH"]
     by_metric = {m.metric: m for m in atrh}
     assert len(by_metric) == 3  # TEMP / DEWP / RH
-    assert by_metric["TEMP"].value == 253.0
+    assert by_metric["TEMP"].value == 25.3  # scaled ÷10
 
 
 def test_parse_timestamp_from_filename() -> None:

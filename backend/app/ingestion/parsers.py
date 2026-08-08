@@ -1,20 +1,9 @@
 """WIDN 1-minute log parser.
 
-The WIDN daily report (``091OneMinute.<YYYYMMDD>.dat``) layout:
-
-    line1 : One Minute Report for WIDN
-    line2 : STN YYYYMMDD GG MM WS WD WGS WGD WS WD WGS WGD WS WD WGS WGD
-            TEMP DEWP RH TEMP DEWP RH TEMP DEWP RH QNH QNH QNH
-            DA DA DA ALS D/N VIS RVR RLS VIS RVR RLS LR1 LR1 SKY SKY
-            RA RA RA PW PW SOL LTX
-    line3 : xxx 04 04 ... (station column map; 04/M/22 repeat per block)
-    line4 : units / notes
-    line5+ : 091 20260101 00 00 <columns...>
-
-Each sensor's columns are the token slots where the symbol row equals the
-sensor's WIDN symbol AND the station-map row equals the site's station.
-We parse ALL metrics for a site (not just one value), carrying both float
-and string values, and mark rows valid/invalid based on missing/corrupt.
+The WIDN daily report (``091OneMinute.<YYYYMMDD>.dat``) has per-station
+(04/M/22) metric blocks. Each sensor maps to one or more WIDN symbols.
+TEMP/DEWP/QNH are transmitted with one extra digit (e.g. 253 => 25.3 C,
+10108 => 1010.8 hPa); `scale` divides the raw value accordingly.
 """
 
 from __future__ import annotations
@@ -30,8 +19,6 @@ MISSING_TOKENS = {"///", "MMMM", "M", "N/A", ""}
 
 @dataclass
 class ParsedMetric:
-    """One metric value for a sensor at a timestamp."""
-
     sensor_code: str
     metric: str
     value: Optional[float]
@@ -42,14 +29,11 @@ class ParsedMetric:
 
 @dataclass
 class ParsedRecord:
-    """The set of metrics extracted from a single log row."""
-
     ts: datetime
     metrics: list[ParsedMetric] = field(default_factory=list)
 
 
 def coerce_value(raw: str) -> Optional[float]:
-    """Coerce a token to float if numeric-looking, else None."""
     token = raw.strip()
     if not token or token in MISSING_TOKENS:
         return None
@@ -61,9 +45,7 @@ def coerce_value(raw: str) -> Optional[float]:
 
 
 def parse_timestamp_from_filename(filename: str) -> Optional[datetime]:
-    import re as _re
-
-    m = _re.search(r"(\d{8})", filename)
+    m = re.search(r"(\d{8})", filename)
     if m:
         try:
             return datetime.strptime(m.group(1), "%Y%m%d").replace(tzinfo=timezone.utc)
@@ -72,19 +54,14 @@ def parse_timestamp_from_filename(filename: str) -> Optional[datetime]:
     return None
 
 
-# ----------------------------------------------------------------------
-# WIDN symbol/station -> sensor metric descriptor
-# ----------------------------------------------------------------------
-# metric names are the WIDN symbol tokens from the header (upper-cased).
+# WIDN symbol -> sensor metric descriptor (scale divides raw value).
 SENSOR_METRICS = {
     "ATRH": [
-        {"metric": "TEMP", "symbol": "TEMP"},
-        {"metric": "DEWP", "symbol": "DEWP"},
+        {"metric": "TEMP", "symbol": "TEMP", "scale": 0.1},
+        {"metric": "DEWP", "symbol": "DEWP", "scale": 0.1},
         {"metric": "RH", "symbol": "RH"},
     ],
-    "BARO": [
-        {"metric": "QNH", "symbol": "QNH"},
-    ],
+    "BARO": [{"metric": "QNH", "symbol": "QNH", "scale": 0.1}],
     "ANEM": [
         {"metric": "WS", "symbol": "WS"},
         {"metric": "WD", "symbol": "WD"},
@@ -98,27 +75,18 @@ SENSOR_METRICS = {
         {"metric": "LR1", "symbol": "LR1"},
         {"metric": "SKY", "symbol": "SKY"},
     ],
-    "RVR": [
-        {"metric": "RVR", "symbol": "RVR"},
-    ],
+    "RVR": [{"metric": "RVR", "symbol": "RVR"}],
     "ALS": [
         {"metric": "ALS_INT", "symbol": "ALS"},
         {"metric": "D/N", "symbol": "D/N"},
     ],
-    "RAIN": [
-        {"metric": "RA", "symbol": "RA"},
-    ],
-    "SOLR": [
-        {"metric": "SOL", "symbol": "SOL"},
-    ],
-    "LIGH": [
-        {"metric": "LTX", "symbol": "LTX"},
-    ],
+    "RAIN": [{"metric": "RA", "symbol": "RA"}],
+    "SOLR": [{"metric": "SOL", "symbol": "SOL"}],
+    "LIGH": [{"metric": "LTX", "symbol": "LTX"}],
 }
 
 
 def _load_header(lines: list[str]) -> tuple[list[str], list[str]]:
-    """Return (symbol_map, station_map) token lists from the header rows."""
     symbol_map: list[str] = []
     station_map: list[str] = []
     for raw in lines:
@@ -127,7 +95,6 @@ def _load_header(lines: list[str]) -> tuple[list[str], list[str]]:
             continue
         tokens = stripped.split()
         if tokens[0] == "STN":
-            # STN YYYYMMDD GG MM WS WD WGS ... -> data columns after 4
             symbol_map = tokens[4:]
         elif tokens[0] == "xxx":
             station_map = tokens[1:]
@@ -136,12 +103,7 @@ def _load_header(lines: list[str]) -> tuple[list[str], list[str]]:
     return symbol_map, station_map
 
 
-def _column_for(symbol: str, station: str, symbol_map: list[str], station_map: list[str]) -> Optional[int]:
-    """Return 0-based index in the data tokens for a symbol+station.
-
-    Scans every occurrence of `symbol`; picks the one where the station
-    map column equals `station`.
-    """
+def _column_for(symbol, station, symbol_map, station_map) -> Optional[int]:
     if not symbol_map:
         return None
     for i, sym in enumerate(symbol_map):
@@ -153,22 +115,14 @@ def _column_for(symbol: str, station: str, symbol_map: list[str], station_map: l
     return None
 
 
-def parse_one_minute_file(
-    path: Path,
-    sensor_specs: dict[str, dict],
-    default_ts: Optional[datetime] = None,
-) -> list[ParsedRecord]:
-    """Parse a daily WIDN file into per-metric records."""
+def parse_one_minute_file(path, sensor_specs, default_ts=None) -> list[ParsedRecord]:
     try:
         content = path.read_text(encoding="utf-8", errors="replace")
     except (OSError, UnicodeError):
         return []
     lines = content.splitlines()
-
     symbol_map, station_map = _load_header(lines)
 
-    # Determine each sensor's station from spec (fallback 04).
-    # sensor_specs: {code: {sensor_id, station, ...}}
     station_of: dict[str, str] = {}
     specs_metrics: dict[str, list[dict]] = {}
     for code, spec in sensor_specs.items():
@@ -176,7 +130,6 @@ def parse_one_minute_file(
         station_of[code] = station
         metrics = SENSOR_METRICS.get(code, [])
         if not metrics:
-            # Fall back to a single 'value' metric using the symbol field.
             metrics = [{"metric": "value", "symbol": spec.get("symbol", "TEMP")}]
         specs_metrics[code] = metrics
 
@@ -208,30 +161,26 @@ def parse_one_minute_file(
                     continue
                 token = data_tokens[idx].strip()
                 val = coerce_value(token)
+                scale = m.get("scale", 1.0)
+                if val is not None and scale != 1.0:
+                    val = round(val * scale, 6)
                 valid = val is not None
                 rec.metrics.append(
                     ParsedMetric(
                         code, m["metric"], val,
-                        token if not valid else None,
-                        valid, line,
+                        token if not valid else None, valid, line,
                     )
                 )
         records.append(rec)
     return records
 
 
-# Backward-compatible alias for tests/older imports.
 def parse_raw_dcp_file(path, sensor_specs, default_ts=None):
-    return []  # raw fallback superseded by WIDN primary parser
+    # /sensor/ folder is not used as a data source anymore.
+    return []
 
 
-def parse_site_batch(
-    one_minute_path: Path,
-    raw_sensor_path: Path,
-    sensor_specs: dict[str, dict],
-    default_ts: Optional[datetime] = None,
-) -> dict[str, list[ParsedMetric]]:
-    """Parse a site's WIDN file, returning metric lists keyed by code."""
+def parse_site_batch(one_minute_path, raw_sensor_path, sensor_specs, default_ts=None):
     result: dict[str, list[ParsedMetric]] = {}
     if not one_minute_path.exists():
         return result

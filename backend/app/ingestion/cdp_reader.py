@@ -200,25 +200,14 @@ class CdpReader:
         return candidates[0]
 
     def resolve_raw_sensor_file(self, site_prefix: str, ts: datetime) -> Optional[Path]:
-        """Resolve the raw DCP file path for a site on the active node.
+        """Raw DCP files are not used as a data source.
 
-        Real layout observed on CDP1/CDP2:
-            <mount_path>/sensor/RWYA.DCP.<YYYYMMDDHH>.dat
+        The monitoring source is exclusively the 1-minute WIDN report in
+        ``/oneminute/``. This method is kept for API compatibility but
+        returns the daily oneminute file (the raw data path is deferred for
+        a future realtime view).
         """
-        active = self.state.active_node()
-        if active is None:
-            return None
-        ts_str = ts.strftime("%Y%m%d%H")
-        sensor_dir = Path(active.mount_path) / "sensor"
-        candidates = [
-            sensor_dir / f"RWYA.DCP.{ts_str}.dat",
-            sensor_dir / f"{site_prefix}.DCP.{ts_str}.dat",
-            sensor_dir / f"{site_prefix}{ts_str}.dat",
-        ]
-        for path in candidates:
-            if path.exists():
-                return path
-        return candidates[0]
+        return self.resolve_site_file(site_prefix, ts)
 
     def active_node_name(self) -> Optional[str]:
         return self.state.active_name

@@ -29,9 +29,9 @@ class Settings(BaseSettings):
     db_pool_pre_ping: bool = True
 
     # ---- CDP network nodes ----
-    cdp1_ip: str = "172.70.55.162"
+    cdp1_ip: str = "172.22.39.162"
     cdp1_mount_path: str = "/mnt/cdp1_logs/"
-    cdp2_ip: str = "172.70.55.163"
+    cdp2_ip: str = "172.22.39.163"
     cdp2_mount_path: str = "/mnt/cdp2_logs/"
 
     # ---- Ingestion ----
