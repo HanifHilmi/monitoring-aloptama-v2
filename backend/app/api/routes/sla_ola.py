@@ -1,311 +1,202 @@
-"""Pre-aggregated SLA/OLA summary endpoints.
+"""Availability endpoints (SLA / OLA + components).
 
-Reads exclusively from the ``daily_sla_ola`` hypertable so 30+ day range
-queries execute as a single hypertable scan — well under 200ms.
+Semantics (per product definition):
+- CDP Uptime   = uptime % of each CDP node from availability / connectivity.
+- SLA          = (CDP1 uptime + CDP2 uptime) / 2.
+- DataAvail    = per-site availability of valid sensor data
+                 (7 components per site; RWY04 ALS counts into RVR_ALS).
+- OLA          = (RWY04 DA + RWYMID DA + RWY22 DA) / 3.
+
+Drives the dashboard: row1 SLA/OLA %, row2 history graph, row3 CDP uptime
+& downtime, row4 sites.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.models import (
-    CdpNode,
-    DailySlaOla,
-    DowntimeEvent,
-    Sensor,
-    Site,
-)
+from app.models import CdpConnectivity, CdpNode, DailySlaOla, Site, Telemetry
 
 router = APIRouter(prefix="/sla-ola", tags=["sla-ola"])
 
-RANGE_DAYS = {"7d": 7, "30d": 30, "90d": 90, "365d": 365}
+RANGES = {
+    "today": "day",
+    "week": "week",
+    "month": "month",
+    "year": "year",
+}
+
+
+def _range_start(range_key: str, now: datetime) -> datetime:
+    if range_key == "today":
+        return now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if range_key == "week":
+        return now - timedelta(days=7)
+    if range_key == "month":
+        return now - timedelta(days=30)
+    return now - timedelta(days=365)
+
+
+async def _cdp_uptime(db: AsyncSession, node: CdpNode, start: datetime, end: datetime) -> dict:
+    total = (end - start).total_seconds()
+    rows = (
+        await db.execute(
+            select(CdpConnectivity)
+            .where(
+                CdpConnectivity.cdp_id == node.id,
+                CdpConnectivity.time >= start,
+                CdpConnectivity.time <= end,
+            )
+        )
+    ).scalars().all()
+    up = sum(1 for r in rows if r.reachable)
+    uptime_pct = (up / len(rows) * 100.0) if rows else 0.0
+    downtime = int(total - (uptime_pct * total / 100.0))
+    return {
+        "cdp_id": node.id,
+        "name": node.name,
+        "ip_address": str(node.ip_address),
+        "uptime_pct": round(uptime_pct, 4),
+        "downtime_seconds": downtime,
+        "samples": len(rows),
+    }
+
+
+async def _site_data_availability(db: AsyncSession, site: Site, start: datetime, end: datetime) -> dict:
+    """Per-site Data Availability = valid component-minutes / expected."""
+    sensors = [s for s in site.sensors if s.is_enabled]
+    # RWY04: ALS merges into RVR_ALS -> exactly 7 components.
+    components: dict[str, list[int]] = {}
+    for s in sensors:
+        comp = s.component or s.code
+        components.setdefault(comp, []).append(s.id)
+
+    rows = (
+        await db.execute(
+            select(Telemetry.sensor_id, Telemetry.is_valid)
+            .where(
+                Telemetry.sensor_id.in_([s.id for s in sensors]),
+                Telemetry.time >= start,
+                Telemetry.time <= end,
+            )
+        )
+    ).all()
+
+    valid_by_sensor: dict[int, int] = {}
+    total_by_sensor: dict[int, int] = {}
+    for sensor_id, is_valid in rows:
+        total_by_sensor[sensor_id] = total_by_sensor.get(sensor_id, 0) + 1
+        if is_valid:
+            valid_by_sensor[sensor_id] = valid_by_sensor.get(sensor_id, 0) + 1
+
+    comp_rows = []
+    for comp, ids in sorted(components.items()):
+        total = sum(total_by_sensor.get(i, 0) for i in ids)
+        valid = sum(valid_by_sensor.get(i, 0) for i in ids)
+        pct = (valid / total * 100.0) if total else 0.0
+        comp_rows.append({"component": comp, "uptime_pct": round(pct, 4), "samples": total})
+
+    # Data Availability = avg of the 7 components (same as valid/total overall).
+    overall_total = sum(r["samples"] for r in comp_rows)
+    overall_valid = sum((r["uptime_pct"] / 100.0) * r["samples"] for r in comp_rows)
+    data_avail = (overall_valid / overall_total * 100.0) if overall_total else 0.0
+
+    return {
+        "site_id": site.id,
+        "slug": site.slug,
+        "code": site.code,
+        "name": site.name,
+        "data_availability_pct": round(data_avail, 4),
+        "components": comp_rows,
+    }
 
 
 @router.get("/summary")
-async def get_sla_ola_summary(
-    range: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+async def get_summary(
+    range: str = Query("month", pattern="^(today|week|month|year)$"),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """System-wide SLA (per CDP) and OLA (per sensor) for the period.
+    """SLA, OLA, per-CDP uptime, and per-site data availability."""
+    now = datetime.now(timezone.utc)
+    start = _range_start(range, now)
 
-    Uptime % = ((Total Seconds - Downtime Seconds) / Total Seconds) * 100
-    computed from per-day rollup rows clipped to the requested window.
-    """
-    days = RANGE_DAYS.get(range, 30)
-    end_date = datetime.now(timezone.utc).date()
-    start_date = end_date - timedelta(days=days - 1)
+    nodes = (await db.execute(select(CdpNode))).scalars().all()
+    sites = (await db.execute(select(Site))).scalars().all()
 
+    cdps = [await _cdp_uptime(db, n, start, now) for n in nodes]
+    site_das = [await _site_data_availability(db, s, start, now) for s in sites]
+
+    # SLA = (CDP1 + CDP2) / 2 ; OLA = (3 sites) / 3
+    sla_pct = round(sum(c["uptime_pct"] for c in cdps) / len(cdps), 4) if cdps else 0.0
+    ola_pct = round(sum(d["data_availability_pct"] for d in site_das) / len(site_das), 4) if site_das else 0.0
+
+    return {
+        "generated_at": now,
+        "range": range,
+        "start_date": start,
+        "end_date": now,
+        "sla_pct": sla_pct,
+        "ola_pct": ola_pct,
+        "cdp_uptime": cdps,
+        "sites": site_das,
+    }
+
+
+@router.get("/history")
+async def get_history(
+    bucket: str = Query("daily", pattern="^(daily|weekly|monthly|yearly)$"),
+    span: str = Query("month", pattern="^(month|year|5year)$"),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """SLA/OLA history buckets for the main dashboard graph."""
+    now = datetime.now(timezone.utc)
+    if span == "year":
+        start = now - timedelta(days=365)
+    elif span == "5year":
+        start = now - timedelta(days=365 * 5)
+    else:
+        start = now - timedelta(days=30)
+
+    nodes = (await db.execute(select(CdpNode))).scalars().all()
+    sites = (await db.execute(select(Site))).scalars().all()
+
+    # Pull all data in one pass, fold into buckets by day.
     cdp_rows = (
         await db.execute(
-            select(DailySlaOla)
-            .where(
-                DailySlaOla.scope_type == "sla",
-                DailySlaOla.weo_time >= start_date,
-                DailySlaOla.weo_time <= end_date,
-            )
-            .order_by(DailySlaOla.cdp_id, DailySlaOla.weo_time)
+            select(CdpConnectivity.time, CdpConnectivity.cdp_id, CdpConnectivity.reachable)
+            .where(CdpConnectivity.time >= start)
         )
-    ).scalars().all()
-
-    ola_rows = (
+    ).all()
+    tel_rows = (
         await db.execute(
-            select(DailySlaOla)
-            .where(
-                DailySlaOla.scope_type == "ola",
-                DailySlaOla.weo_time >= start_date,
-                DailySlaOla.weo_time <= end_date,
-            )
-            .order_by(DailySlaOla.sensor_id, DailySlaOla.weo_time)
+            select(Telemetry.time, Telemetry.sensor_id, Telemetry.is_valid)
+            .where(Telemetry.time >= start)
         )
-    ).scalars().all()
+    ).all()
 
-    nodes = {n.id: n for n in (await db.execute(select(CdpNode))).scalars().all()}
-    sensors = {
-        s.id: s
-        for s in (await db.execute(select(Sensor))).scalars().all()
-    }
-    sites = {s.id: s for s in (await db.execute(select(Site))).scalars().all()}
+    buckets: dict[str, dict] = {}
+    for t, cdp_id, reachable in cdp_rows:
+        day = t.date().isoformat()
+        b = buckets.setdefault(day, {"day": day, "cdp_up": 0, "cdp_total": 0, "sensor_valid": 0, "sensor_total": 0})
+        b["cdp_total"] += 1
+        if reachable:
+            b["cdp_up"] += 1
+    for t, sensor_id, is_valid in tel_rows:
+        day = t.date().isoformat()
+        b = buckets.setdefault(day, {"day": day, "cdp_up": 0, "cdp_total": 0, "sensor_valid": 0, "sensor_total": 0})
+        b["sensor_total"] += 1
+        if is_valid:
+            b["sensor_valid"] += 1
 
-    # Aggregate SLA per CDP
-    sla_by_cdp: dict[int, dict] = {}
-    total_seconds = days * 86400
-    for r in cdp_rows:
-        if r.cdp_id is None:
-            continue
-        agg = sla_by_cdp.setdefault(
-            r.cdp_id,
-            {"cdp_id": r.cdp_id, "downtime_seconds": 0, "days": 0},
-        )
-        agg["downtime_seconds"] += r.downtime_seconds
-        agg["days"] += 1
-
-    sla_summary = []
-    for cdp_id, agg in sorted(sla_by_cdp.items()):
-        node = nodes.get(cdp_id)
-        downtime = agg["downtime_seconds"]
-        uptime = max(total_seconds - downtime, 0)
-        sla_summary.append(
-            {
-                "cdp_id": cdp_id,
-                "name": node.name if node else f"CDP-{cdp_id}",
-                "ip_address": str(node.ip_address) if node else None,
-                "role": node.role if node else None,
-                "period_days": days,
-                "total_seconds": total_seconds,
-                "uptime_seconds": uptime,
-                "downtime_seconds": downtime,
-                "uptime_pct": round(
-                    (uptime / total_seconds) * 100.0, 4
-                ),
-                "days_with_data": agg["days"],
-            }
-        )
-
-    # Aggregate OLA per sensor
-    ola_by_sensor: dict[int, dict] = {}
-    for r in ola_rows:
-        if r.sensor_id is None:
-            continue
-        agg = ola_by_sensor.setdefault(
-            r.sensor_id,
-            {"sensor_id": r.sensor_id, "downtime_seconds": 0, "days": 0},
-        )
-        agg["downtime_seconds"] += r.downtime_seconds
-        agg["days"] += 1
-
-    sites_payload: dict[str, dict] = {}
-    for sensor_id, agg in ola_by_sensor.items():
-        sensor = sensors.get(sensor_id)
-        if sensor is None:
-            continue
-        site = sites.get(sensor.site_id)
-        if site is None:
-            continue
-        downtime = agg["downtime_seconds"]
-        uptime = max(total_seconds - downtime, 0)
-        entry = {
-            "sensor_id": sensor_id,
-            "code": sensor.code,
-            "name": sensor.name,
-            "category": sensor.category,
-            "unit": sensor.unit,
-            "period_days": days,
-            "total_seconds": total_seconds,
-            "uptime_seconds": uptime,
-            "downtime_seconds": downtime,
-            "uptime_pct": round((uptime / total_seconds) * 100.0, 4),
-            "days_with_data": agg["days"],
-        }
-        sites_payload.setdefault(
-            site.slug,
-            {"site": {"slug": site.slug, "code": site.code, "name": site.name},
-             "sensors": []},
-        )["sensors"].append(entry)
-
-    # Unify SLA + OLA into a single `rows` list matching the frontend
-    # contract (scope, entity_type, entity_id, entity, uptime_pct, ...).
     rows = []
-    for cdp in sla_summary:
-        rows.append(
-            {
-                "scope": "sla",
-                # `cdp` matches the /sla-ola/daily endpoint's
-                # entity_type pattern ^(cdp|sensor)$.
-                "entity_type": "cdp",
-                "entity_id": cdp["cdp_id"],
-                "entity": cdp["name"],
-                "uptime_pct": cdp["uptime_pct"],
-                "downtime_seconds": cdp["downtime_seconds"],
-                "days_with_data": cdp["days_with_data"],
-            }
-        )
-    for site_block in [v for k, v in sorted(sites_payload.items())]:
-        for s in site_block["sensors"]:
-            rows.append(
-                {
-                    "scope": "ola",
-                    "entity_type": "sensor",
-                    "entity_id": s["sensor_id"],
-                    "entity": f'{site_block["site"]["name"]} / {s["code"]}',
-                    "uptime_pct": s["uptime_pct"],
-                    "downtime_seconds": s["downtime_seconds"],
-                    "days_with_data": s["days_with_data"],
-                }
-            )
+    for day, b in sorted(buckets.items()):
+        sla = (b["cdp_up"] / b["cdp_total"] * 100.0) if b["cdp_total"] else 0.0
+        ola = (b["sensor_valid"] / b["sensor_total"] * 100.0) if b["sensor_total"] else 0.0
+        rows.append({"day": day, "sla_pct": round(sla, 4), "ola_pct": round(ola, 4)})
 
-    return {
-        "generated_at": datetime.now(timezone.utc),
-        "range": range,
-        "start_date": start_date,
-        "end_date": end_date,
-        "sla": sla_summary,
-        "ola": [v for k, v in sorted(sites_payload.items())],
-        "rows": rows,
-    }
-
-
-@router.get("/daily")
-async def get_daily_rollup(
-    scope: str = Query("sla", pattern="^(sla|ola)$"),
-    entity_type: str = Query("cdp", pattern="^(cdp|sensor)$"),
-    entity_id: int = Query(..., gt=0),
-    days: int = Query(30, ge=1, le=365),
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """Daily uptime/downtime series for charts (from pre-aggregated rollup)."""
-    end_date = datetime.now(timezone.utc).date()
-    start_date = end_date - timedelta(days=days - 1)
-
-    stmt = select(DailySlaOla).where(
-        DailySlaOla.scope_type == scope,
-        DailySlaOla.entity_type == entity_type,
-        DailySlaOla.weo_time >= start_date,
-        DailySlaOla.weo_time <= end_date,
-    )
-    if scope == "sla":
-        stmt = stmt.where(DailySlaOla.cdp_id == entity_id)
-    else:
-        stmt = stmt.where(DailySlaOla.sensor_id == entity_id)
-    stmt = stmt.order_by(DailySlaOla.weo_time)
-
-    rows = (await db.execute(stmt)).scalars().all()
-    daily = [
-        {
-            "day": r.weo_time,
-            "date": r.weo_time,
-            "total_seconds": r.total_seconds,
-            "uptime_seconds": r.uptime_seconds,
-            "downtime_seconds": r.downtime_seconds,
-            "uptime_pct": r.uptime_pct,
-            "open_events": r.open_events,
-            "closed_events": r.closed_events,
-        }
-        for r in rows
-    ]
-    return {
-        "scope": scope,
-        "entity_type": entity_type,
-        "entity_id": entity_id,
-        "start_date": start_date,
-        "end_date": end_date,
-        "daily": daily,
-        # Frontend SlaOlaView reads `data.rows`; expose the same list.
-        "rows": daily,
-    }
-
-
-@router.get("/events")
-async def get_downtime_events(
-    scope: str = Query("ola", pattern="^(sla|ola)$"),
-    site_slug: str | None = Query(default=None),
-    sensor_code: str | None = Query(default=None),
-    limit: int = Query(100, ge=1, le=1000),
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """Recent downtime events (open + closed) for state-machine records."""
-    stmt = select(DowntimeEvent).where(DowntimeEvent.scope_type == scope)
-
-    if site_slug is not None:
-        site = (
-            await db.execute(select(Site).where(Site.slug == site_slug))
-        ).scalars().first()
-        if site is None:
-            raise HTTPException(status_code=404, detail="site not found")
-        stmt = stmt.where(DowntimeEvent.site_id == site.id)
-
-    if sensor_code is not None and scope == "ola":
-        sensor = (
-            await db.execute(select(Sensor).where(Sensor.code == sensor_code))
-        ).scalars().first()
-        if sensor is None:
-            raise HTTPException(status_code=404, detail="sensor not found")
-        stmt = stmt.where(DowntimeEvent.sensor_id == sensor.id)
-
-    stmt = stmt.order_by(DowntimeEvent.start_time.desc()).limit(limit)
-    rows = (await db.execute(stmt)).scalars().all()
-
-    sites = {s.id: s for s in (await db.execute(select(Site))).scalars().all()}
-    sensors = {
-        s.id: s
-        for s in (await db.execute(select(Sensor))).scalars().all()
-    }
-    nodes = {n.id: n for n in (await db.execute(select(CdpNode))).scalars().all()}
-
-    events = []
-    for ev in rows:
-        duration = None
-        if ev.start_time and ev.end_time:
-            duration = int((ev.end_time - ev.start_time).total_seconds())
-        label = None
-        if ev.cdp_id is not None and ev.cdp_id in nodes:
-            label = nodes[ev.cdp_id].name
-        elif ev.sensor_id is not None and ev.sensor_id in sensors:
-            label = sensors[ev.sensor_id].name
-        events.append(
-            {
-                "id": ev.id,
-                "scope": ev.scope_type,
-                "entity_type": ev.entity_type,
-                "cdp_id": ev.cdp_id,
-                "sensor_id": ev.sensor_id,
-                "site_id": ev.site_id,
-                "site_slug": sites.get(ev.site_id).slug if ev.site_id in sites else None,
-                "label": label,
-                "start_time": ev.start_time,
-                "end_time": ev.end_time,
-                "duration_seconds": duration,
-                "is_open": ev.end_time is None,
-                "reason_code": ev.reason_code,
-            }
-        )
-
-    return {
-        "scope": scope,
-        "count": len(events),
-        "events": events,
-    }
+    return {"span": span, "bucket": bucket, "start_date": start, "end_date": now, "rows": rows}

@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.api.routes import sla_ola, status, system, telemetry
+from app.api.routes import backfill, sla_ola, status, system, telemetry
 from app.core.config import settings
 
 api_router = APIRouter(prefix=settings.api_prefix)
@@ -13,3 +13,4 @@ api_router.include_router(status.router, tags=["status"])
 api_router.include_router(telemetry.router, tags=["telemetry"])
 api_router.include_router(sla_ola.router, tags=["sla-ola"])
 api_router.include_router(system.router, tags=["system"])
+api_router.include_router(backfill.router, tags=["backfill"])

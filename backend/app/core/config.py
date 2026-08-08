@@ -41,7 +41,9 @@ class Settings(BaseSettings):
     connectivity_timeout_seconds: float = 5.0
     backfill_start: str = "2026-01-01T00:00:00Z"
     backfill_batch_days: int = 1
-    enable_backfill_on_boot: bool = True
+    # Backfill is triggered manually from the dashboard Settings -> Backfill
+    # (CDP uptime and DCP data). We do NOT backfill automatically on boot.
+    enable_backfill_on_boot: bool = False
     enable_migrations_on_boot: bool = True
     telemetry_stale_after_minutes: int = 5
 
