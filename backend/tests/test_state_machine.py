@@ -42,6 +42,7 @@ async def test_sla_open_and_close() -> None:
     assert ev_open is not None
     assert ev_open.start_time == t0
     assert ev_open.end_time is None
+    assert ev_open.entity_type == "cdp_node"  # must match DB CHECK constraint
     assert sm.get_open_since("sla", "cdp", 1) == t0
 
     # No duplicate while already down

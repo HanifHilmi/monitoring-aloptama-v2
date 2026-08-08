@@ -83,7 +83,7 @@ async def transition_sla(
         sm.set_open_since("sla", "cdp", cdp_id, ts)
         ev = DowntimeEvent(
             scope_type="sla",
-            entity_type="cdp",
+            entity_type="cdp_node",
             cdp_id=cdp_id,
             site_id=site_id,
             start_time=ts,
