@@ -53,6 +53,14 @@ services:
     container_name: monitoring-worker
     restart: unless-stopped
     entrypoint: ["/bin/sh", "/code/docker/worker-entrypoint.sh"]
+    # Worker is a background process (not an HTTP server); the image's
+    # /health check does not apply. Report healthy while the process runs.
+    healthcheck:
+      test: ["CMD", "true"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     env_file:
       - path: .env
         required: false

@@ -68,8 +68,12 @@ async def run_migrations(session: AsyncSession | None = None) -> list[str]:
             continue
         sql = path.read_text(encoding="utf-8")
         logger.info("Applying migration %s", path.name)
-        # TimescaleDB DDL is not transactional-safe in all versions; run per file.
-        await session.execute(text(sql))
+        # asyncpg does not support multiple statements in a single execute().
+        # Split the file into individual statements and run each separately.
+        for stmt in _split_sql_statements(sql):
+            if not stmt.strip():
+                continue
+            await session.execute(text(stmt))
         await _mark_applied(session, path.name)
         await session.commit()
         ran.append(path.name)
@@ -79,6 +83,44 @@ async def run_migrations(session: AsyncSession | None = None) -> list[str]:
     else:
         logger.info("No pending migrations")
     return ran
+
+
+def _split_sql_statements(sql: str) -> list[str]:
+    """Split a SQL script into individual statements on top-level semicolons.
+
+    Handles dollar-quoted bodies (e.g. PL/pgSQL functions) and single-line
+    comments so semicolons inside them are not treated as statement breaks.
+    """
+    statements: list[str] = []
+    current: list[str] = []
+    in_dollar = False
+    dollar_tag: str | None = None
+    in_line_comment = False
+
+    for line in sql.splitlines():
+        stripped = line.strip()
+        if in_line_comment:
+            in_line_comment = False
+        if stripped.startswith("--"):
+            continue
+        if not in_dollar:
+            # Detect dollar-quote start (e.g. $$ or $func$)
+            import re
+            m = re.search(r"\$[A-Za-z_0-9]*\$", line)
+            if m:
+                in_dollar = True
+                dollar_tag = m.group(0)
+        else:
+            if dollar_tag and dollar_tag in line:
+                in_dollar = False
+                dollar_tag = None
+        current.append(line)
+        if not in_dollar and line.rstrip().endswith(";"):
+            statements.append("\n".join(current))
+            current = []
+    if current and "\n".join(current).strip():
+        statements.append("\n".join(current))
+    return statements
 
 
 async def is_database_initialized(session: AsyncSession) -> bool:

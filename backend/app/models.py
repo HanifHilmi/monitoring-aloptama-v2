@@ -119,12 +119,11 @@ class DowntimeEvent(Base):
 class DailySlaOla(Base):
     __tablename__ = "daily_sla_ola"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    weo_time: Mapped[date] = mapped_column(Date)
-    scope_type: Mapped[str] = mapped_column(String)
-    entity_type: Mapped[str] = mapped_column(String)
-    cdp_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    sensor_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    weo_time: Mapped[date] = mapped_column(Date, primary_key=True)
+    scope_type: Mapped[str] = mapped_column(String, primary_key=True)
+    entity_type: Mapped[str] = mapped_column(String, primary_key=True)
+    cdp_id: Mapped[int] = mapped_column(Integer, primary_key=True, default=0)    # 0 = not applicable (OLA)
+    sensor_id: Mapped[int] = mapped_column(Integer, primary_key=True, default=0)  # 0 = not applicable (SLA)
     site_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     total_seconds: Mapped[int] = mapped_column(BigInteger)
     uptime_seconds: Mapped[int] = mapped_column(BigInteger)

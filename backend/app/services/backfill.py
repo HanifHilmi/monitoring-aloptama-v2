@@ -51,8 +51,8 @@ def _parse_backfill_start(value: str) -> datetime:
 
 async def is_database_uninitialized(session: AsyncSession) -> bool:
     """True when no telemetry and no connectivity samples exist."""
-    tel = (await session.execute(select(func.count(Telemetry.id)))).scalar_one()
-    conn = (await session.execute(select(func.count(CdpConnectivity.id)))).scalar_one()
+    tel = (await session.execute(select(func.count(Telemetry.time)))).scalar_one()
+    conn = (await session.execute(select(func.count(CdpConnectivity.time)))).scalar_one()
     return tel == 0 and conn == 0
 
 

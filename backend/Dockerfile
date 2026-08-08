@@ -33,7 +33,11 @@ USER app
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD curl -fsS http://localhost:8000/api/v1/status/overview >/dev/null || exit 1
+# Lightweight liveness probe — no DB dependency, so the container stays
+# healthy during first-boot backfill (which runs in the worker container).
+HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl -fsS http://localhost:8000/health >/dev/null || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--proxy-headers"]
+# Single worker: the ingestion worker + backfill run in the dedicated
+# worker container; duplicate API workers would duplicate loop tasks.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers"]

@@ -76,6 +76,6 @@ JOIN (VALUES
     ('RWYMID', 'RAIN', 'Rain Gauge',            'rain_gauge',         'mm',  0.0,         500.0,     6, '53:68'),
     ('RWYMID', 'SOLR', 'Solar Radiation',       'solar_radiation',    'W/m2',0.0,         2000.0,    7, '69:84'),
     ('RWYMID', 'LIGH', 'Lightning Detector',    'lightning_detector', 'strikes', 0.0,     10000.0,   8, '85:104')
-) AS v(code, name, category, unit, min_valid, max_valid, position, fallback_slice)
-  ON s.code = v.code
+) AS v(site_code, code, name, category, unit, min_valid, max_valid, position, fallback_slice)
+  ON s.code = v.site_code
 ON CONFLICT (site_id, code) DO NOTHING;

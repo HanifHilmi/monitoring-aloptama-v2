@@ -58,9 +58,9 @@ async def load_open_events(session: AsyncSession, sm: DowntimeStateMachine) -> N
     rows = (await session.execute(stmt)).scalars().all()
     for ev in rows:
         if ev.scope_type == "sla" and ev.cdp_id is not None:
-            sm.set_open_since("sla", "cdp", ev.cdp_id)
+            sm.set_open_since("sla", "cdp", ev.cdp_id, ev.start_time)
         elif ev.scope_type == "ola" and ev.sensor_id is not None:
-            sm.set_open_since("ola", "sensor", ev.sensor_id)
+            sm.set_open_since("ola", "sensor", ev.sensor_id, ev.start_time)
 
 
 async def transition_sla(

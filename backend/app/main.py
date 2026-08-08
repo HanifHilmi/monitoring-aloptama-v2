@@ -42,14 +42,10 @@ async def lifespan(app: FastAPI):
                 if applied:
                     logger.info("Applied migrations: %s", ", ".join(applied))
 
-        # 2) Auto-backfill on first boot (when DB is uninitialized)
-        if settings.enable_backfill_on_boot:
-            async with AsyncSessionLocal() as session:
-                ran = await run_initial_backfill_if_needed(session)
-                if ran:
-                    logger.info("Initial historical backfill completed")
-
-        # 3) Start the ingestion worker
+        # 2) Start the ingestion worker.
+        #    Historical backfill runs in the dedicated worker container before
+        #    ingestion starts — NOT inline here — so the API stays responsive
+        #    during the (potentially long) first-boot backfill.
         async with AsyncSessionLocal() as session:
             worker = await build_worker(session)
         await worker.start()

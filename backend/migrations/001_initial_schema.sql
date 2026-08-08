@@ -115,28 +115,24 @@ CREATE INDEX IF NOT EXISTS idx_downtime_events_lookup
 --    Guarantees sub-200ms dashboard queries over 30+ day ranges
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS daily_sla_ola (
-    id                   BIGSERIAL PRIMARY KEY,
     weo_time             DATE NOT NULL,
     scope_type           TEXT NOT NULL CHECK (scope_type IN ('sla', 'ola')),
     entity_type          TEXT NOT NULL CHECK (entity_type IN ('cdp_node', 'sensor')),
-    cdp_id               INTEGER,
-    sensor_id            INTEGER,
+    cdp_id               INTEGER NOT NULL DEFAULT 0,   -- 0 = not applicable (OLA)
+    sensor_id            INTEGER NOT NULL DEFAULT 0,   -- 0 = not applicable (SLA)
     site_id              INTEGER,
     total_seconds        BIGINT NOT NULL,
     uptime_seconds       BIGINT NOT NULL,
     downtime_seconds     BIGINT NOT NULL,
     uptime_pct           DOUBLE PRECISION NOT NULL,
     open_events          INTEGER NOT NULL DEFAULT 0,
-    closed_events        INTEGER NOT NULL DEFAULT 0
+    closed_events        INTEGER NOT NULL DEFAULT 0,
+    -- Composite PK: partition column (weo_time) must be part of every
+    -- unique index/constraint for TimescaleDB hypertables. Sentinel 0
+    -- in cdp_id/sensor_id represents "not applicable" so PK columns
+    -- are never NULL.
+    PRIMARY KEY (weo_time, scope_type, entity_type, cdp_id, sensor_id)
 );
--- Uniqueness across SLA (cdp_id set, sensor_id NULL) and OLA
--- (sensor_id set, cdp_id NULL) rows. COALESCE maps NULL -> 0 so the
--- composite key is never NULL (PostgreSQL PK/UNIQUE columns cannot be NULL).
-CREATE UNIQUE INDEX IF NOT EXISTS uq_daily_sla_ola_entity
-    ON daily_sla_ola (
-        weo_time, scope_type, entity_type,
-        COALESCE(cdp_id, 0), COALESCE(sensor_id, 0)
-    );
 
 -- ---------------------------------------------------------------------
 -- TimescaleDB hypertables
