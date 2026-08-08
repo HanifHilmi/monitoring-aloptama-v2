@@ -71,6 +71,9 @@ services:
       - path: .env
         required: false
     environment:
+      # Marks this container as the ingestion worker so /system/health
+      # reports worker: ok (both containers share the python image).
+      WORKER_MODE: "true"
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-monitor}:${POSTGRES_PASSWORD:-monitor}@db:5432/${POSTGRES_DB:-monitoring_aloptama}
       CDP1_IP: ${CDP1_IP:-172.22.39.162}
       CDP1_MOUNT_PATH: ${CDP1_MOUNT_PATH:-/mnt/cdp1_logs/}
