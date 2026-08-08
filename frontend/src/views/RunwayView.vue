@@ -15,6 +15,7 @@ const selectedSensor = ref(null)
 const olaEvents = ref([])
 const olaLoading = ref(false)
 const timer = ref(null)
+const range = ref('24h')  // unified time range for all sensor cards
 
 const site = computed(() =>
   (overview.value?.sites || []).find((s) => s.slug === props.siteSlug),
@@ -111,13 +112,23 @@ onUnmounted(() => clearInterval(timer.value))
 
       <!-- Sensor grid (dynamic from master table - no repetitive coding) -->
       <section>
-        <h2 class="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-400">Sensors</h2>
+        <div class="mb-2 flex items-center justify-between">
+          <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">Sensors</h2>
+          <select v-model="range" class="rounded border border-runway-border bg-runway-panel px-2 py-1 text-xs text-slate-200 focus:outline-none">
+            <option value="1h">Last 1 hour</option>
+            <option value="6h">Last 6 hours</option>
+            <option value="24h">Last 24 hours</option>
+            <option value="7d">Last 7 days</option>
+            <option value="30d">Last 30 days</option>
+          </select>
+        </div>
         <div class="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
           <SensorCard
             v-for="sensor in sensors"
             :key="sensor.id"
             :sensor="sensor"
             :site-slug="site.slug"
+            :range="range"
             @click="selectSensor(sensor)"
           />
         </div>

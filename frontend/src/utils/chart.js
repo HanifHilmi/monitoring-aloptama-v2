@@ -51,6 +51,89 @@ export function buildTimeSeriesOption({ times, series, unit = '', color = '#38bd
   }
 }
 
+// Dual-axis line chart for sensors with two units (e.g. ATRH: TEMP <-> RH).
+export function buildDualAxisOption({ left, right, leftName = '', rightName = '' }) {
+  return {
+    animation: false,
+    grid: baseGrid(),
+    tooltip: { ...baseTooltip() },
+    xAxis: {
+      type: 'time',
+      axisLine: { lineStyle: { color: AXIS_COLOR } },
+      axisLabel: { color: AXIS_COLOR, fontSize: 11 },
+      splitLine: { show: false },
+    },
+    yAxis: [
+      {
+        type: 'value',
+        scale: true,
+        axisLabel: { color: AXIS_COLOR, fontSize: 11 },
+        splitLine: { lineStyle: { color: SPLIT_COLOR } },
+        name: leftName,
+        nameTextStyle: { color: AXIS_COLOR, fontSize: 11 },
+      },
+      {
+        type: 'value',
+        scale: true,
+        axisLabel: { color: AXIS_COLOR, fontSize: 11 },
+        splitLine: { show: false },
+        name: rightName,
+        nameTextStyle: { color: AXIS_COLOR, fontSize: 11 },
+      },
+    ],
+    series: [
+      {
+        name: leftName,
+        type: 'line',
+        data: left.map((p) => [p.time, p.value]),
+        showSymbol: false,
+        lineStyle: { width: 1.5, color: '#38bdf8' },
+        itemStyle: { color: '#38bdf8' },
+      },
+      {
+        name: rightName,
+        type: 'line',
+        yAxisIndex: 1,
+        data: right.map((p) => [p.time, p.value]),
+        showSymbol: false,
+        lineStyle: { width: 1.5, color: '#a78bfa' },
+        itemStyle: { color: '#a78bfa' },
+      },
+    ],
+  }
+}
+
+// Dot (scatter) chart for e.g. ceilometer LR1; zeros excluded by caller.
+export function buildDotOption({ points, name = '', color = '#34d399' }) {
+  return {
+    animation: false,
+    grid: baseGrid(),
+    tooltip: { ...baseTooltip() },
+    xAxis: {
+      type: 'time',
+      axisLine: { lineStyle: { color: AXIS_COLOR } },
+      axisLabel: { color: AXIS_COLOR, fontSize: 11 },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: 'value',
+      scale: true,
+      axisLabel: { color: AXIS_COLOR, fontSize: 11 },
+      splitLine: { lineStyle: { color: SPLIT_COLOR } },
+      name,
+      nameTextStyle: { color: AXIS_COLOR, fontSize: 11 },
+    },
+    series: [
+      {
+        type: 'scatter',
+        data: points.map((p) => [p.time, p.value]),
+        symbolSize: 5,
+        itemStyle: { color },
+      },
+    ],
+  }
+}
+
 export function buildOlaTimelineOption({ events, startIso, endIso, colorOk = '#10b981', colorDown = '#ef4444' }) {
   const downBands = events
     .filter((e) => e.end_time)
@@ -111,7 +194,6 @@ export function buildOlaTimelineOption({ events, startIso, endIso, colorOk = '#1
 }
 
 export function buildSlaTimelineOption({ samples, startIso, endIso, colorOk = '#10b981', colorDown = '#ef4444' }) {
-  // Connectivity samples: [{time, reachable}]. Merge consecutive states into bands.
   const bands = []
   let runStart = null
   let runState = null

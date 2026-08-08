@@ -19,10 +19,11 @@ export const api = {
     request(`/status/cdp/${cdpId}/connectivity?hours=${hours}`),
 
   // Telemetry
-  getTelemetry: (siteSlug, sensorCode, range = '24h', downsample = 1000) =>
-    request(
-      `/telemetry/${siteSlug}/${sensorCode}?range=${range}&downsample=${downsample}`,
-    ),
+  getTelemetry: (siteSlug, sensorCode, range = '24h', downsample = 1000, metric) => {
+    const q = new URLSearchParams({ range, downsample })
+    if (metric) q.set('metric', metric)
+    return request(`/telemetry/${siteSlug}/${sensorCode}?${q.toString()}`)
+  },
 
   // SLA / OLA
   getSlaOlaSummary: (range = '30d') =>
