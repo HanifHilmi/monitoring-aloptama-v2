@@ -2,13 +2,13 @@
 
 - ``POST /backfill/cdp``: SLA from the oneminute WIDN files at FULL
   1-minute resolution, filling BACKWARDS from now -> backfill_start so the
-  most recent data lands first. For every minute it checks whether the
-  matching oneminute file actually contains that minute's row; writes one
-  CdpConnectivity row per minute (reachable = row present). Missing minute
-  => downtime. Per-day logs show minutes-up/total and the source file.
-- ``POST /backfill/dcp``: DCP/sensor telemetry from the same files. Each
-  day runs in its own try/except + commit so one corrupt file logs an
-  ERROR line and the stream keeps going instead of dying.
+  most recent data lands first. Per minute it checks whether the matching
+  oneminute file contains that minute's row; writes one CdpConnectivity
+  row per minute (reachable = row present). Missing minute => downtime.
+  Per-day logs show minutes-up/total and the source file.
+- ``POST /backfill/dcp``: DCP/sensor telemetry from the same files, per-day
+  try/except + commit so one corrupt file logs an ERROR and the stream
+  continues.
 """
 
 from __future__ import annotations
@@ -41,13 +41,18 @@ def _parse(value: str) -> datetime:
     return datetime.fromisoformat(value).astimezone(timezone.utc)
 
 
-def _day_lines(down_to: datetime) -> int:
-    """Iterate DAYS backwards from now (inclusive) down to `down_to`."""
-    now = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    down = down_to.replace(hour=0, minute=0, second=0, microsecond=0)
-    if down > now:
-        return 0
-    return int((now - down).total_seconds() // 86400) + 1
+def _day_start(dt: datetime) -> datetime:
+    return dt.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _resolve_day_file(reader, sites, day: datetime):
+    """Return (path|None, name|None) of the day's universal oneminute file."""
+    for site in sites:
+        for prefix in site.file_prefixes or []:
+            p = reader.resolve_site_file(prefix, day)
+            if p and p.exists():
+                return p, p.name
+    return None, None
 
 
 async def _stream_cdp():
@@ -63,43 +68,33 @@ async def _stream_cdp():
                 ]
             )
             target = _parse(settings.backfill_start).replace(second=0, microsecond=0)
+            target_day = _day_start(target)
+            now = datetime.now(timezone.utc)
             total_rows = 0
 
-            # Iterate backwards from today down to the target date.
-            cur = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-            target_day = target.replace(hour=0, minute=0, second=0, microsecond=0)
-            while cur >= target_day:
-                # For the current day, scan minutes backwards from end-of-day.
-                day_end = min(cur + timedelta(days=1), datetime.now(timezone.utc))
-                # Resolve the day's oneminute file (universal station file).
-                one_min = None
-                for site in sites:
-                    for prefix in site.file_prefixes or []:
-                        one_min = reader.resolve_site_file(prefix, cur)
-                        if one_min and one_min.exists():
-                            break
-                    if one_min and one_min.exists():
-                        break
-                src = one_min.name if one_min and one_min.exists() else None
+            # Fill backwards: today -> target.
+            cur_day = _day_start(now)
+            while cur_day >= target_day:
+                day_start = cur_day
+                day_end = min(cur_day + timedelta(days=1), now)
 
-                # Minutes actually present in the file.
+                one_min, src = _resolve_day_file(reader, sites, cur_day)
                 present: set[datetime] = set()
-                if src:
+                if one_min is not None:
                     try:
-                        for rec in parse_one_minute_file(one_min, {}, cur):
+                        for rec in parse_one_minute_file(one_min, {}, cur_day):
                             present.add(rec.ts.replace(second=0, microsecond=0))
                     except Exception as exc:  # noqa: BLE001
                         logger.error("CDP backfill parse error %s: %s", src, exc)
                         present = set()
 
                 minutes_up = 0
-                # Iterate minutes backwards within the day.
+                total_minutes = max(1, int((day_end - day_start).total_seconds() // 60))
                 minute = day_end.replace(second=0, microsecond=0)
-                first_min = cur
-                while minute > first_min:
+                while minute > day_start:
                     minute -= timedelta(minutes=1)
                     if minute < target:
-                        break
+                        continue
                     reachable = minute in present
                     if reachable:
                         minutes_up += 1
@@ -116,16 +111,12 @@ async def _stream_cdp():
                     total_rows += len(nodes)
 
                 await session.commit()
-                day_minutes = int(min(day_end, datetime.now(timezone.utc)) % (24 * 60) // 1) or 0
-                total_minutes = max(1, int((min(day_end, datetime.now(timezone.utc)) - cur).total_seconds() // 60))
-                logger.info(
-                    "CDP backfill day=%s up=%d/%d src=%s",
-                    cur.date(), minutes_up, total_minutes, src,
-                )
+                logger.info("CDP backfill day=%s up=%d/%d src=%s",
+                            cur_day.date(), minutes_up, total_minutes, src)
                 yield _sse(
-                    f"CDP backfill {cur.date()} up={minutes_up}/{total_minutes} src={src or 'MISSING'}"
+                    f"CDP backfill {cur_day.date()} up={minutes_up}/{total_minutes} src={src or 'MISSING'}"
                 )
-                cur -= timedelta(days=1)
+                cur_day -= timedelta(days=1)
 
             logger.info("CDP backfill complete (%d connectivity rows)", total_rows)
             yield _sse(f"CDP backfill COMPLETE rows={total_rows}")
@@ -158,6 +149,8 @@ async def _stream_dcp():
             sites = (await session.execute(select(Site))).scalars().all()
             sensors = (await session.execute(select(Sensor))).scalars().all()
             target = _parse(settings.backfill_start).replace(second=0, microsecond=0)
+            target_day = _day_start(target)
+            now = datetime.now(timezone.utc)
             total_metric_rows = 0
 
             for site in sites:
@@ -170,21 +163,16 @@ async def _stream_dcp():
                     continue
 
                 # Fill backwards per day, from today down to target.
-                cur = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-                target_day = target.replace(hour=0, minute=0, second=0, microsecond=0)
-                while cur >= target_day:
-                    day_end = min(cur + timedelta(days=1), datetime.now(timezone.utc))
-                    one_min = None
-                    for prefix in site.file_prefixes or []:
-                        one_min = reader.resolve_site_file(prefix, cur)
-                        if one_min and one_min.exists():
-                            break
-                    src = one_min.name if one_min and one_min.exists() else None
+                cur_day = _day_start(now)
+                while cur_day >= target_day:
+                    day_start = cur_day
+                    day_end = min(cur_day + timedelta(days=1), now)
+                    one_min, src = _resolve_day_file(reader, [site], cur_day)
                     try:
                         minutes = 0
                         metric_rows = 0
-                        if src:
-                            default_ts = parse_timestamp_from_filename(one_min.name) or cur
+                        if one_min is not None:
+                            default_ts = parse_timestamp_from_filename(one_min.name) or cur_day
                             recs = parse_one_minute_file(one_min, specs, default_ts)
                             minutes = len(recs)
                             for rec in recs:
@@ -215,8 +203,7 @@ async def _stream_dcp():
                         else:
                             # No file -> mark each sensor metric missing per minute.
                             minute = day_end.replace(second=0, microsecond=0)
-                            first_min = cur
-                            while minute > first_min:
+                            while minute > day_start:
                                 minute -= timedelta(minutes=1)
                                 if minute < target:
                                     break
@@ -239,16 +226,16 @@ async def _stream_dcp():
                         await session.commit()
                         logger.info(
                             "DCP backfill site=%s day=%s minutes=%d metric_rows=%d src=%s",
-                            site.slug, cur.date(), minutes, metric_rows, src,
+                            site.slug, cur_day.date(), minutes, metric_rows, src,
                         )
                         yield _sse(
-                            f"DCP site {site.slug} {cur.date()} minutes={minutes} rows={metric_rows} src={src or 'MISSING'}"
+                            f"DCP site {site.slug} {cur_day.date()} minutes={minutes} rows={metric_rows} src={src or 'MISSING'}"
                         )
                     except Exception as exc:  # noqa: BLE001
                         await session.rollback()
-                        logger.error("DCP backfill error site=%s day=%s: %s", site.slug, cur.date(), exc)
-                        yield _sse(f"ERROR DCP backfill site={site.slug} day={cur.date()} : {exc}")
-                    cur -= timedelta(days=1)
+                        logger.error("DCP backfill error site=%s day=%s: %s", site.slug, cur_day.date(), exc)
+                        yield _sse(f"ERROR DCP backfill site={site.slug} day={cur_day.date()} : {exc}")
+                    cur_day -= timedelta(days=1)
 
             logger.info("DCP backfill complete (%d metric rows)", total_metric_rows)
             yield _sse(f"DCP backfill COMPLETE rows={total_metric_rows}")
