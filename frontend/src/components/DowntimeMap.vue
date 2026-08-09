@@ -13,12 +13,49 @@ async function load() {
   loading.value = true
   try {
     const d = await api.getDowntimeMap(year.value)
-    cdps.value = d.cdps || []
+    let list = d.cdps || []
+    if (!list.length) {
+      // No backfilled data yet: build zero-filled heatmaps from the known
+      // CDP nodes so the calendar graphs always render (all days = 0 min).
+      const ov = await api.getStatusOverview().catch(() => null)
+      const nodes = ov?.cdp_nodes || [
+        { cdp_id: 1, name: 'CDP1' },
+        { cdp_id: 2, name: 'CDP2' },
+      ]
+      const zeroDays = zeroDaysFor(year.value)
+      list = nodes.map((n) => ({
+        cdp_id: n.cdp_id ?? n.id,
+        name: n.name,
+        days: zeroDays.map((day) => ({ day, downtime_minutes: 0 })),
+      }))
+    }
+    cdps.value = list
   } catch {
-    cdps.value = []
+    // Keep whatever we had (or fall back to zeros).
+    if (!cdps.value.length) {
+      cdps.value = [
+        { cdp_id: 1, name: 'CDP1', days: zeroDaysFor(year.value).map((day) => ({ day, downtime_minutes: 0 })) },
+        { cdp_id: 2, name: 'CDP2', days: zeroDaysFor(year.value).map((day) => ({ day, downtime_minutes: 0 })) },
+      ]
+    }
   } finally {
     loading.value = false
   }
+}
+
+// All days of the year up to today (or the full year for past years).
+function zeroDaysFor(y) {
+  const out = []
+  const now = new Date()
+  const lastDay = y < now.getUTCFullYear()
+    ? new Date(Date.UTC(y, 11, 31))
+    : now
+  const d = new Date(Date.UTC(y, 0, 1))
+  while (d <= lastDay) {
+    out.push(`${y}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`)
+    d.setUTCDate(d.getUTCDate() + 1)
+  }
+  return out
 }
 
 // Build an ECharts calendar-heatmap option for one CDP node.
