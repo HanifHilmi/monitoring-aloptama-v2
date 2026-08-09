@@ -9,7 +9,7 @@ import PeriodPicker from '@/components/PeriodPicker.vue'
 
 // Independent period pickers.
 const slaPeriod = ref(currentPeriod('monthly'))   // SLA/OLA section
-const cdpPeriod = ref(currentPeriod('weekly'))     // CDP Uptime section
+const cdpPeriod = ref(currentPeriod('weekly'))    // CDP Uptime section
 
 // SLA/OLA history keeps its own dropdown (bucket/span) — independent.
 const bucket = ref('daily')
@@ -26,7 +26,7 @@ function onTzChange() { tzTick.value++ }
 onMounted(() => window.addEventListener('tzchange', onTzChange))
 onBeforeUnmount(() => window.removeEventListener('tzchange', onTzChange))
 
-// ---- Live SLA/OLA (always available from real-time status) ----
+// ---- Live SLA/OLA (only when the historical summary is unavailable) ----
 const liveSla = computed(() => {
   const nodes = live.value?.cdp_nodes || []
   if (!nodes.length) return null
@@ -43,9 +43,11 @@ const liveOla = computed(() => {
   return vals.reduce((a, b) => a + b, 0) / vals.length
 })
 
-// Preferred: historical summary for the SLA period, else live snapshot.
-const slaPct = computed(() => slaOla.value?.sla_pct ?? liveSla.value)
-const olaPct = computed(() => slaOla.value?.ola_pct ?? liveOla.value)
+// For the chosen period: whenever the historical summary exists we use its
+// values even if 0 (no data in period = DOWN, as agreed). Only fall back to
+// the live snapshot when the summary endpoint is unavailable.
+const slaPct = computed(() => (slaOla.value ? slaOla.value.sla_pct : liveSla.value))
+const olaPct = computed(() => (slaOla.value ? slaOla.value.ola_pct : liveOla.value))
 
 const cdps = computed(() => live.value?.cdp_nodes || slaOla.value?.cdp_uptime || [])
 const sites = computed(() => {
@@ -82,8 +84,7 @@ const cdpStateMaps = computed(() => {
   return maps
 })
 
-// SLA/OLA history BAR chart driven only by its own dropdowns, x-axis
-// spanning the chosen history window (empty grid when no data).
+// SLA/OLA history BAR chart driven only by its own dropdowns.
 const historyOption = computed(() => {
   const rows = [...history.value].sort((a, b) => a.day.localeCompare(b.day))
   return {
@@ -165,7 +166,7 @@ onUnmounted(() => clearInterval(timer.value))
             <span class="text-[10px] text-slate-500">Avg of CDP1 + CDP2 uptime · {{ slaPeriod.label }}</span>
           </div>
           <div class="mt-1 text-4xl font-bold" :class="(slaPct ?? 0) >= 99 ? 'text-emerald-400' : 'text-amber-400'">
-            {{ slaPct === null ? '—' : slaPct.toFixed(2) + '%' }}
+            {{ slaPct === null || slaPct === undefined ? '—' : slaPct.toFixed(2) + '%' }}
           </div>
         </div>
         <div class="panel">
@@ -174,7 +175,7 @@ onUnmounted(() => clearInterval(timer.value))
             <span class="text-[10px] text-slate-500">Avg data availability · {{ slaPeriod.label }}</span>
           </div>
           <div class="mt-1 text-4xl font-bold" :class="(olaPct ?? 0) >= 99 ? 'text-emerald-400' : 'text-amber-400'">
-            {{ olaPct === null ? '—' : olaPct.toFixed(2) + '%' }}
+            {{ olaPct === null || olaPct === undefined ? '—' : olaPct.toFixed(2) + '%' }}
           </div>
         </div>
       </div>
@@ -215,7 +216,7 @@ onUnmounted(() => clearInterval(timer.value))
         <div v-if="!cdps.length" class="panel text-center text-sm text-slate-500">No CDP nodes configured</div>
       </div>
 
-      <!-- UPTIME HISTORY: untouched for now (will become dropdown history later) -->
+      <!-- UPTIME HISTORY: untouched for now -->
       <div v-if="cdps.length" class="mt-4">
         <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
           Uptime History ({{ cdpPeriod.label }})
@@ -261,7 +262,7 @@ onUnmounted(() => clearInterval(timer.value))
       </div>
     </section>
 
-    <!-- SLA/OLA HISTORY: own dropdown, independent of the other pickers -->
+    <!-- SLA/OLA HISTORY: own dropdown, independent -->
     <section class="panel">
       <div class="mb-2 flex items-center justify-between">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">SLA / OLA History</h2>
