@@ -40,6 +40,8 @@ export const api = {
     if (win?.end) q.set('end', win.end)
     return request(`/sla-ola/history?${q.toString()}`)
   },
+  // Downtime map (yearly calendar heatmap)
+  getDowntimeMap: (year) => request(`/sla-ola/downtime-map?year=${year}`),
   // Legacy alias kept for SlaOlaView until migrated
   getSlaOlaSummary: (range = '30d') =>
     request(`/sla-ola/summary?range=${range}`),

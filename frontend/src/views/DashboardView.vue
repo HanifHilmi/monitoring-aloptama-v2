@@ -2,8 +2,8 @@
 import { api } from '@/api/client'
 import { computed, onBeforeUnmount, onMounted, onUnmounted, ref } from 'vue'
 import { formatDateTime } from '@/utils/timezone'
-import { buildUptimeStateMapOption } from '@/utils/chart'
 import { currentPeriod } from '@/utils/period'
+import DowntimeMap from '@/components/DowntimeMap.vue'
 import EChart from '@/components/EChart.vue'
 import PeriodPicker from '@/components/PeriodPicker.vue'
 
@@ -19,7 +19,6 @@ const live = ref(null)          // /status/overview (real-time)
 const slaOla = ref(null)        // /sla-ola/summary (historical) - SLA period
 const cdpOla = ref(null)        // /sla-ola/summary (historical) - CDP period
 const history = ref([])
-const connectivity = ref({})   // cdp_id -> samples[]
 const timer = ref(null)
 const error = ref(null)
 const tzTick = ref(0)
@@ -59,8 +58,13 @@ const cdps = computed(() => {
     return sum ? { ...c, uptime_pct: sum.uptime_pct, downtime_seconds: sum.downtime_seconds } : c
   })
 })
+// Sites — Data Availability tied to the CDP Uptime period picker
+// (cdpOla summary already uses the same start/end, missing = DOWN).
 const sites = computed(() => {
-  const liveSites = (live.value?.sites || []).map((s) => ({
+  const hist = cdpOla.value?.sites || []
+  if (hist.length) return hist
+  // fallback: live overview (sensor health) when no historical summary yet
+  return (live.value?.sites || []).map((s) => ({
     site_id: s.id,
     slug: s.slug,
     code: s.code,
@@ -70,27 +74,6 @@ const sites = computed(() => {
       : 0,
     sensors: s.sensors || [],
   }))
-  if (liveSites.length) return liveSites
-  return slaOla.value?.sites || []
-})
-
-// UPTIME HISTORY state-map follows the CDP Uptime period picker.
-const cdpStateMaps = computed(() => {
-  const end = cdpPeriod.value.end
-  const start = cdpPeriod.value.start
-  const maps = {}
-  for (const c of cdps.value) {
-    const id = c.cdp_id ?? c.id
-    const samples = (connectivity.value[id] || []).map((s) => ({
-      time: s.time,
-      reachable: s.reachable === true,
-    }))
-    maps[id] = {
-      option: buildUptimeStateMapOption({ samples, startIso: start, endIso: end }),
-      has: samples.length > 0,
-    }
-  }
-  return maps
 })
 
 // SLA/OLA history BAR chart driven only by its own dropdowns.
@@ -109,23 +92,6 @@ const historyOption = computed(() => {
     ],
   }
 })
-
-async function loadCdpConnectivity() {
-  try {
-    const nodes = live.value?.cdp_nodes || []
-    const hours = Math.max(1, Math.ceil((new Date(cdpPeriod.value.end) - new Date(cdpPeriod.value.start)) / 3600000))
-    const entries = await Promise.all(
-      nodes.map(async (c) => {
-        const id = c.cdp_id ?? c.id
-        const data = await api.getCdpConnectivity(id, hours).catch(() => ({ samples: [] }))
-        return [id, data.samples || []]
-      }),
-    )
-    connectivity.value = Object.fromEntries(entries)
-  } catch {
-    connectivity.value = {}
-  }
-}
 
 function onSlaPeriod() { loadSummary() }
 function onCdpPeriod() { loadSummary() }  // re-fetch both summaries (cdpPeriod drives CDP cards)
@@ -150,7 +116,6 @@ async function loadSummary() {
 
 async function loadAll() {
   await loadSummary()
-  await loadCdpConnectivity()
 }
 
 onMounted(() => {
@@ -227,27 +192,9 @@ onUnmounted(() => clearInterval(timer.value))
         <div v-if="!cdps.length" class="panel text-center text-sm text-slate-500">No CDP nodes configured</div>
       </div>
 
-      <!-- UPTIME HISTORY: untouched for now -->
-      <div v-if="cdps.length" class="mt-4">
-        <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-          Uptime History ({{ cdpPeriod.label }})
-        </h3>
-        <div class="grid gap-4 md:grid-cols-2">
-          <div v-for="c in cdps" :key="'map-' + (c.cdp_id ?? c.id)" class="panel">
-            <div class="mb-1 flex items-center justify-between">
-              <span class="font-mono text-xs font-semibold text-slate-200">{{ c.name }}</span>
-              <span class="text-xs text-slate-400">{{ c.ip_address || c.ip }}</span>
-            </div>
-            <EChart
-              v-if="cdpStateMaps[c.cdp_id ?? c.id]?.has"
-              :option="cdpStateMaps[c.cdp_id ?? c.id].option"
-              height="90px"
-            />
-            <div v-else class="flex h-[90px] items-center justify-center text-xs text-slate-500">
-              No history yet — run Backfill CDP uptime
-            </div>
-          </div>
-        </div>
+      <!-- DOWNTIME MAP: yearly calendar heatmap (own year picker inside) -->
+      <div class="mt-4">
+        <DowntimeMap />
       </div>
     </section>
 
