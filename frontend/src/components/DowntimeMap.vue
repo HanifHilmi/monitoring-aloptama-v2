@@ -3,19 +3,20 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { api } from '@/api/client'
 import EChart from '@/components/EChart.vue'
 
-const cdps = ref([])          // [{cdp_id,name,days:[{day,downtime_minutes}]}]
+const cdps = ref([])
 const year = ref(new Date().getUTCFullYear())
 const loading = ref(false)
 const Y_MIN = 2026
 const Y_MAX = new Date().getUTCFullYear()
 let timer = null
 
-async function load() {
-  loading.value = true
+async function load(withLoader = false) {
+  // Show the spinner only on FIRST load or year change; background refresh
+  // updates data in-place so the chart never disappears/reappears.
+  if (withLoader) loading.value = true
   try {
     const d = await api.getDowntimeMap(year.value)
     let list = d.cdps || []
-    // Zero-fill fallback so the chart always renders even before backfill.
     if (!list.length) {
       const ov = await api.getStatusOverview().catch(() => null)
       const nodes = ov?.cdp_nodes || [
@@ -41,6 +42,9 @@ async function load() {
     loading.value = false
   }
 }
+
+function loadShow() { load(true) }
+function loadSilent() { load(false) }
 
 // All days of the year up to today (or the full year for past years).
 function zeroDaysFor(y) {
@@ -74,7 +78,7 @@ function buildOption() {
         return `${params.value[0]}: <b>${val}</b> down`
       },
     },
-    // Piecewise visualMap (no slider): fixed downtime buckets.
+    // Piecewise visualMap (no slider): same red shade, different opacity.
     visualMap: {
       type: 'piecewise',
       orient: 'horizontal',
@@ -83,18 +87,18 @@ function buildOption() {
       textStyle: { color: '#94a3b8', fontSize: 10 },
       pieces: [
         { value: 0, label: '0', color: '#0f172a' },
-        { lte: 59, min: 1, label: '1–59', color: '#fca5a5' },      // light red
-        { lte: 359, min: 60, label: '60–359', color: '#ef4444' },  // medium red
-        { min: 360, label: '360+', color: '#7f1d1d' },             // dark red
+        { lte: 59, min: 1, label: '1–59', color: 'rgba(239,68,68,0.30)' },
+        { lte: 359, min: 60, label: '60–359', color: 'rgba(239,68,68,0.65)' },
+        { min: 360, label: '360+', color: 'rgba(239,68,68,1)' },
       ],
     },
     calendar: [
       {
         top: 16,
-        left: 34,
+        left: 40,
         right: 16,
         bottom: '52%',
-        cellSize: ['auto', 14],
+        cellSize: [14, 14],
         range: [startDate, endDate],
         splitLine: { lineStyle: { color: '#1e293b' } },
         itemStyle: { color: '#0b1220', borderWidth: 0 },
@@ -104,10 +108,10 @@ function buildOption() {
       },
       {
         top: '54%',
-        left: 34,
+        left: 40,
         right: 16,
         bottom: 32,
-        cellSize: ['auto', 14],
+        cellSize: [14, 14],
         range: [startDate, endDate],
         splitLine: { lineStyle: { color: '#1e293b' } },
         itemStyle: { color: '#0b1220', borderWidth: 0 },
@@ -149,13 +153,13 @@ function navYearPage(delta) {
 function pickYear(y) {
   year.value = y
   yearOpen.value = false
-  load()
+  loadShow()
 }
 
 onMounted(() => {
-  load()
-  // Auto-refresh so newly persisted connectivity updates the heatmaps.
-  timer = setInterval(load, 30_000)
+  loadShow() // initial load shows the spinner
+  // Background refresh: updates data in place WITHOUT removing the chart.
+  timer = setInterval(loadSilent, 30_000)
 })
 onBeforeUnmount(() => clearInterval(timer))
 </script>
@@ -190,6 +194,7 @@ onBeforeUnmount(() => clearInterval(timer))
     </div>
 
     <div v-if="loading" class="py-12 text-center text-xs text-slate-500">Loading…</div>
+    <div v-else-if="!cdps.length" class="py-12 text-center text-xs text-slate-500">No CDP nodes</div>
     <div v-else class="panel">
       <!-- One combined chart: CDP1 (top) + CDP2 (bottom), shared piecewise legend -->
       <EChart :option="buildOption()" height="460px" />
