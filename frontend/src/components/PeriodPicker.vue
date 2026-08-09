@@ -32,6 +32,12 @@ const shortMonths = MONTHS.map((m) => m.slice(0, 3))
 const days = computed(() => daysInMonth(year.value, monthIdx.value))
 const weekdays = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 const leadingBlanks = computed(() => new Date(Date.UTC(year.value, monthIdx.value, 1)).getUTCDay())
+const weekLabel = computed(() => {
+  const e = new Date(weekWindow(year.value, monthIdx.value, day.value).end)
+  const s = new Date(weekWindow(year.value, monthIdx.value, day.value).start)
+  const fmt = (d) => `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()].slice(0,3)}`
+  return `${fmt(s)} – ${fmt(e)} ${e.getUTCFullYear()}`
+})
 const yearPageStart = ref(YEAR_MIN)  // first year of the visible 8-year page
 
 const yearPage = computed(() => {
@@ -224,7 +230,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMouseDown))
     <!-- Weekly calendar popover -->
     <div v-else-if="category === 'weekly'" class="relative">
       <button class="rounded bg-runway-dark px-2 py-1 text-slate-200" @click="togglePop('weekly')">
-        {{ day }} {{ MONTHS[monthIdx].slice(0, 3) }} {{ year }} ▾
+        {{ weekLabel }} ▾
       </button>
       <div v-if="openFor === 'weekly'"
         class="absolute left-0 top-full z-30 mt-1 w-56 rounded-md border border-runway-border bg-runway-panel p-2 shadow-xl">

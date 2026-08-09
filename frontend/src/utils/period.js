@@ -39,11 +39,12 @@ export function quarterWindow(year, qIdx) {
 }
 
 export function weekWindow(year, monthIdx, day) {
-  // Selected start date; window = that day + 7 days (end exclusive).
-  const start = new Date(Date.UTC(year, monthIdx, day, 0, 0, 0, 0))
-  const end = new Date(start.getTime() + 7 * MS_DAY)
+  // Window ENDS at the clicked day: [day-6 .. day] (7 days).
+  const end = new Date(Date.UTC(year, monthIdx, day, 0, 0, 0, 0))
+  const start = new Date(end.getTime() - 6 * MS_DAY)
   return {
-    key: 'weekly', label: `${day} ${MONTHS[monthIdx]} ${year} (+7d)`,
+    key: 'weekly',
+    label: `${MONTHS[day < 7 ? monthIdx : monthIdx].slice(0,3)} ${end.getUTCDate()} – ${end.getUTCDate()} ${year}`,
     start: start.toISOString(), end: end.toISOString(),
   }
 }
