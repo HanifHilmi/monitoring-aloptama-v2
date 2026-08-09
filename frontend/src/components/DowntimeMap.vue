@@ -11,8 +11,6 @@ const Y_MAX = new Date().getUTCFullYear()
 let timer = null
 
 async function load(withLoader = false) {
-  // Show the spinner only on FIRST load or year change; background refresh
-  // updates data in-place so the chart never disappears/reappears.
   if (withLoader) loading.value = true
   try {
     const d = await api.getDowntimeMap(year.value)
@@ -46,7 +44,6 @@ async function load(withLoader = false) {
 function loadShow() { load(true) }
 function loadSilent() { load(false) }
 
-// All days of the year up to today (or the full year for past years).
 function zeroDaysFor(y) {
   const out = []
   const now = new Date()
@@ -61,18 +58,23 @@ function zeroDaysFor(y) {
   return out
 }
 
-// One combined option: CDP1 + CDP2 calendars + one shared PIECEWISE visualMap.
-function buildOption() {
+// One chart per CDP node: each has its OWN calendar box tall enough for
+// square cells, a title above it, and an identical piecewise visualMap.
+// (Previously two calendars shared one chart — ECharts auto-size made one
+//  stretch and the other shrink/overlap the title.)
+function buildOption(cdp) {
   const startDate = `${year.value}-01-01`
   const endDate = `${year.value}-12-31`
-  const byIndex = (i) => (cdps.value[i]?.days || []).map((r) => [r.day, r.downtime_minutes])
+  const data = (cdp.days || []).map((r) => [r.day, r.downtime_minutes])
 
   return {
     animation: true,
-    title: [
-      { text: cdps.value[0]?.name || 'CDP1', left: 'center', top: 20, textStyle: { color: '#e2e8f0', fontSize: 12, fontWeight: 'bold' } },
-      { text: cdps.value[1]?.name || 'CDP2', left: 'center', top: 320, textStyle: { color: '#e2e8f0', fontSize: 12, fontWeight: 'bold' } },
-    ],
+    title: {
+      text: cdp.name || '',
+      left: 'center',
+      top: 0,
+      textStyle: { color: '#e2e8f0', fontSize: 13, fontWeight: 'bold' },
+    },
     tooltip: {
       backgroundColor: '#0b1220',
       borderColor: '#1e2a45',
@@ -82,7 +84,7 @@ function buildOption() {
         return `${params.value[0]}: <b>${val}</b> down`
       },
     },
-    // Piecewise visualMap (no slider): same red shade, different opacity.
+    // Piecewise visualMap (no slider): same red, increasing opacity.
     visualMap: {
       type: 'piecewise',
       orient: 'horizontal',
@@ -96,48 +98,24 @@ function buildOption() {
         { min: 360, label: '360+', color: 'rgba(239,68,68,1)' },
       ],
     },
-    calendar: [
-      {
-        top: 44,
-        left: 40,
-        right: 16,
-        bottom: 250,
-        cellSize: 'auto',
-        range: [startDate, endDate],
-        splitLine: { lineStyle: { color: '#1e293b' } },
-        itemStyle: { color: '#0b1220', borderWidth: 0 },
-        yearLabel: { show: false },
-        dayLabel: { color: '#94a3b8', fontSize: 9, height: 12 },
-        monthLabel: { color: '#64748b', fontSize: 10 },
-      },
-      {
-        top: 330,
-        left: 40,
-        right: 16,
-        bottom: 36,
-        cellSize: 'auto',
-        range: [startDate, endDate],
-        splitLine: { lineStyle: { color: '#1e293b' } },
-        itemStyle: { color: '#0b1220', borderWidth: 0 },
-        yearLabel: { show: false },
-        dayLabel: { color: '#94a3b8', fontSize: 9, height: 12 },
-        monthLabel: { color: '#64748b', fontSize: 10 },
-      },
-    ],
+    calendar: {
+      top: 28,
+      left: 40,
+      right: 16,
+      bottom: 40,
+      cellSize: 'auto',
+      range: [startDate, endDate],
+      splitLine: { lineStyle: { color: '#1e293b' } },
+      itemStyle: { color: '#0b1220', borderWidth: 0 },
+      yearLabel: { show: false },
+      dayLabel: { color: '#94a3b8', fontSize: 9, height: 12 },
+      monthLabel: { color: '#64748b', fontSize: 10 },
+    },
     series: [
       {
-        name: cdps.value[0]?.name || 'CDP1',
         type: 'heatmap',
         coordinateSystem: 'calendar',
-        calendarIndex: 0,
-        data: byIndex(0),
-      },
-      {
-        name: cdps.value[1]?.name || 'CDP2',
-        type: 'heatmap',
-        coordinateSystem: 'calendar',
-        calendarIndex: 1,
-        data: byIndex(1),
+        data,
       },
     ],
   }
@@ -161,8 +139,7 @@ function pickYear(y) {
 }
 
 onMounted(() => {
-  loadShow() // initial load shows the spinner
-  // Background refresh: updates data in place WITHOUT removing the chart.
+  loadShow()
   timer = setInterval(loadSilent, 30_000)
 })
 onBeforeUnmount(() => clearInterval(timer))
@@ -199,9 +176,11 @@ onBeforeUnmount(() => clearInterval(timer))
 
     <div v-if="loading" class="py-12 text-center text-xs text-slate-500">Loading…</div>
     <div v-else-if="!cdps.length" class="py-12 text-center text-xs text-slate-500">No CDP nodes</div>
-    <div v-else class="panel">
-      <!-- One combined chart: CDP1 (top) + CDP2 (bottom), shared piecewise legend -->
-      <EChart :option="buildOption()" height="460px" />
+    <!-- One full-width card per CDP: own box, own square cells, own title -->
+    <div v-else class="space-y-6">
+      <div v-for="c in cdps" :key="c.cdp_id" class="panel">
+        <EChart :option="buildOption(c)" height="300px" />
+      </div>
     </div>
   </div>
 </template>
