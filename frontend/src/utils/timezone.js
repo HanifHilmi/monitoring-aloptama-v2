@@ -1,5 +1,4 @@
-// Shared timezone state (UTC <-> WIB) read by chart builders.
-// WIB = UTC+7, so timestamps displayed are shifted +7h when WIB active.
+// Shared UTC/WIB toggle for charts. Device timezone is never used.
 const state = { tz: 'UTC' }
 
 export function setTz(tz) {
@@ -9,9 +8,5 @@ export function setTz(tz) {
 
 export const getTz = () => state.tz
 
-// Shift an ISO timestamp for display (+7h for WIB).
-export function displayTime(iso) {
-  const d = new Date(iso)
-  if (state.tz === 'WIB') return new Date(d.getTime() + 7 * 3600 * 1000).toISOString()
-  return iso
-}
+// ECharts root `timezone` (v5.5+): renders every time axis in a fixed zone.
+export const chartTimezone = () => (state.tz === 'WIB' ? 'Asia/Jakarta' : 'UTC')

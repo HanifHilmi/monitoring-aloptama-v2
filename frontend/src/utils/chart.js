@@ -17,8 +17,9 @@ function baseTooltip() {
   }
 }
 
-// Normalize a raw time (ISO or Date) to UTC+? shifted display ISO.
-const shift = (t) => displayTime(new Date(t).toISOString())
+// Data timestamps are UTC; the display offset (WIB = +7h) is handled by
+// ECharts' root `timezone` option in EChart.vue, so no client-side shift.
+const shift = (t) => new Date(t).toISOString()
 
 export function buildTimeSeriesOption({ times, series, unit = '', color = '#38bdf8' }) {
   const shifted = times.map(shift)
