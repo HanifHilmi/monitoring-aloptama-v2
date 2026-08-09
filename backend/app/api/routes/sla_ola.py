@@ -247,17 +247,17 @@ async def downtime_map(
     year: int = Query(2026, ge=2026, le=2099),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Per-day downtime minutes for a year (calendar heatmap input).
+    """Per-CDP per-day downtime minutes for a year (calendar heatmap input).
 
-    downtime = expected minutes of the day - up minutes, summed across all
-    CDP nodes; minutes without a connectivity row count as DOWN.
+    Each CDP node gets its own day list: down = expected minutes - up
+    minutes; a minute without a connectivity row counts as DOWN.
     """
     now = datetime.now(timezone.utc)
     nodes = (await db.execute(select(CdpNode))).scalars().all()
     start = datetime(year, 1, 1, tzinfo=timezone.utc)
     end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
-    if start >= now:
-        return {"year": year, "rows": []}
+    if start >= now or not nodes:
+        return {"year": year, "cdps": []}
 
     up_rows = (
         await db.execute(
@@ -270,22 +270,21 @@ async def downtime_map(
             {"start": start, "end": end},
         )
     ).all()
-    up_by: dict[str, dict[int, int]] = {}
+    up_by: dict[int, dict[str, int]] = {}
     for cdp_id, d, up in up_rows:
-        up_by.setdefault(d.date().isoformat(), {})[cdp_id] = up or 0
+        up_by.setdefault(cdp_id, {})[d.date().isoformat()] = up or 0
 
-    rows_out: list[dict] = []
-    day = start
     last_day = now.date() if year == now.year else datetime(year, 12, 31, tzinfo=timezone.utc).date()
-    while day.date() <= last_day:
-        day_end = min(day + timedelta(days=1), now)
-        total_min = max(1, int((day_end - day).total_seconds() // 60))
-        per_node = up_by.get(day.date().isoformat(), {})
-        down = 0
-        for n in nodes:
-            up = min(per_node.get(n.id, 0), total_min)
-            down += max(0, total_min - up)
-        rows_out.append({"day": day.date().isoformat(), "downtime_minutes": down})
-        day += timedelta(days=1)
+    out_cdps = []
+    for n in nodes:
+        days = []
+        day = start
+        while day.date() <= last_day:
+            day_end = min(day + timedelta(days=1), now)
+            total_min = max(1, int((day_end - day).total_seconds() // 60))
+            up = min(up_by.get(n.id, {}).get(day.date().isoformat(), 0), total_min)
+            days.append({"day": day.date().isoformat(), "downtime_minutes": max(0, total_min - up)})
+            day += timedelta(days=1)
+        out_cdps.append({"cdp_id": n.id, "name": n.name, "days": days})
 
-    return {"year": year, "rows": rows_out}
+    return {"year": year, "cdps": out_cdps}

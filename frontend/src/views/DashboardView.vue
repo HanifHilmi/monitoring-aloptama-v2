@@ -192,10 +192,7 @@ onUnmounted(() => clearInterval(timer.value))
         <div v-if="!cdps.length" class="panel text-center text-sm text-slate-500">No CDP nodes configured</div>
       </div>
 
-      <!-- DOWNTIME MAP: yearly calendar heatmap (own year picker inside) -->
-      <div class="mt-4">
-        <DowntimeMap />
-      </div>
+
     </section>
 
     <!-- Sites (Data Availability, live sensor health) -->
@@ -218,6 +215,11 @@ onUnmounted(() => clearInterval(timer.value))
         </RouterLink>
         <div v-if="!sites.length" class="panel text-center text-sm text-slate-500">No sites configured</div>
       </div>
+    </section>
+
+    <!-- DOWNTIME MAP: own section, per-CDP ECharts calendar heatmap -->
+    <section>
+      <DowntimeMap />
     </section>
 
     <!-- SLA/OLA HISTORY: own dropdown, independent -->
