@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
 from app.core.config import settings
 from app.db.migrate import reset_database, run_migrations
-from app.db.session import AsyncSessionLocal
+from app.db.session import AsyncSessionLocal, engine
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,6 +36,11 @@ async def lifespan(app: FastAPI):
         if settings.reset_db_on_boot:
             async with AsyncSessionLocal() as session:
                 await reset_database(session)
+                # Dispose pooled connections that had timescaledb pre-loaded —
+                # migration 001 (CREATE EXTENSION timescaledb) must run on a
+                # fresh connection, otherwise it fails with
+                # 'extension already loaded with another version'.
+                await engine.dispose()
                 logger.info("DB reset on boot: schema dropped + recreated")
 
         # 1) Apply pending migrations (idempotent)
