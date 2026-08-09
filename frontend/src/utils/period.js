@@ -42,9 +42,10 @@ export function weekWindow(year, monthIdx, day) {
   // Window ENDS at the clicked day: [day-6 .. day] (7 days).
   const end = new Date(Date.UTC(year, monthIdx, day, 0, 0, 0, 0))
   const start = new Date(end.getTime() - 6 * MS_DAY)
+  const fmt = (d) => `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()].slice(0, 3)}`
   return {
     key: 'weekly',
-    label: `${MONTHS[day < 7 ? monthIdx : monthIdx].slice(0,3)} ${end.getUTCDate()} – ${end.getUTCDate()} ${year}`,
+    label: `${fmt(start)} – ${fmt(end)} ${end.getUTCFullYear()}`,
     start: start.toISOString(), end: end.toISOString(),
   }
 }
