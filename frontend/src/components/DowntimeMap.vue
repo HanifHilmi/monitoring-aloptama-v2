@@ -70,8 +70,8 @@ function buildOption() {
   return {
     animation: true,
     title: [
-      { text: cdps.value[0]?.name || 'CDP1', left: 'center', top: 0, textStyle: { color: '#e2e8f0', fontSize: 12, fontWeight: 'bold' } },
-      { text: cdps.value[1]?.name || 'CDP2', left: 'center', top: '54%', textStyle: { color: '#e2e8f0', fontSize: 12, fontWeight: 'bold' } },
+      { text: cdps.value[0]?.name || 'CDP1', left: 'center', top: 20, textStyle: { color: '#e2e8f0', fontSize: 12, fontWeight: 'bold' } },
+      { text: cdps.value[1]?.name || 'CDP2', left: 'center', top: 320, textStyle: { color: '#e2e8f0', fontSize: 12, fontWeight: 'bold' } },
     ],
     tooltip: {
       backgroundColor: '#0b1220',
@@ -98,11 +98,11 @@ function buildOption() {
     },
     calendar: [
       {
-        top: 16,
+        top: 44,
         left: 40,
         right: 16,
-        bottom: '52%',
-        cellSize: [14, 14],
+        bottom: 250,
+        cellSize: 'auto',
         range: [startDate, endDate],
         splitLine: { lineStyle: { color: '#1e293b' } },
         itemStyle: { color: '#0b1220', borderWidth: 0 },
@@ -111,11 +111,11 @@ function buildOption() {
         monthLabel: { color: '#64748b', fontSize: 10 },
       },
       {
-        top: '58%',
+        top: 330,
         left: 40,
         right: 16,
-        bottom: 32,
-        cellSize: [14, 14],
+        bottom: 36,
+        cellSize: 'auto',
         range: [startDate, endDate],
         splitLine: { lineStyle: { color: '#1e293b' } },
         itemStyle: { color: '#0b1220', borderWidth: 0 },
