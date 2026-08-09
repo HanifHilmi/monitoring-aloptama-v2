@@ -139,7 +139,7 @@ async def _site_data_availability(db: AsyncSession, site: Site, start: datetime,
 
 @router.get("/summary")
 async def get_summary(
-    range: str = Query("month", pattern="^(today|3d|week|month|year)$"),
+    range: str = Query("month", pattern="^(today|3d|week|month|year|custom)$"),
     start: str | None = Query(default=None, description="ISO-8601 UTC start (overrides range)"),
     end: str | None = Query(default=None, description="ISO-8601 UTC end (overrides range)"),
     db: AsyncSession = Depends(get_db),

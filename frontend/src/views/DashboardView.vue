@@ -16,7 +16,8 @@ const bucket = ref('daily')
 const span = ref('month')
 
 const live = ref(null)          // /status/overview (real-time)
-const slaOla = ref(null)        // /sla-ola/summary (historical)
+const slaOla = ref(null)        // /sla-ola/summary (historical) - SLA period
+const cdpOla = ref(null)        // /sla-ola/summary (historical) - CDP period
 const history = ref([])
 const connectivity = ref({})   // cdp_id -> samples[]
 const timer = ref(null)
@@ -49,7 +50,15 @@ const liveOla = computed(() => {
 const slaPct = computed(() => (slaOla.value ? slaOla.value.sla_pct : null))
 const olaPct = computed(() => (slaOla.value ? slaOla.value.ola_pct : null))
 
-const cdps = computed(() => live.value?.cdp_nodes || slaOla.value?.cdp_uptime || [])
+// CDP cards show uptime from the CDP-period summary (UP-min/period-min).
+const cdps = computed(() => {
+  const list = live.value?.cdp_nodes || slaOla.value?.cdp_uptime || []
+  return list.map((c) => {
+    const id = c.cdp_id ?? c.id
+    const sum = (cdpOla.value?.cdp_uptime || []).find((x) => (x.cdp_id ?? x.id) === id)
+    return sum ? { ...c, uptime_pct: sum.uptime_pct, downtime_seconds: sum.downtime_seconds } : c
+  })
+})
 const sites = computed(() => {
   const liveSites = (live.value?.sites || []).map((s) => ({
     site_id: s.id,
@@ -119,7 +128,7 @@ async function loadCdpConnectivity() {
 }
 
 function onSlaPeriod() { loadSummary() }
-function onCdpPeriod() { loadCdpConnectivity() }
+function onCdpPeriod() { loadSummary() }  // re-fetch both summaries (cdpPeriod drives CDP cards)
 
 async function loadSummary() {
   try {
@@ -131,6 +140,8 @@ async function loadSummary() {
     live.value = lv
     slaOla.value = so
     history.value = h.rows || []
+    // CDP-period summary for the CDP Uptime cards (0% when no data).
+    cdpOla.value = await api.getAvailability('custom', cdpPeriod.value).catch(() => null)
     error.value = null
   } catch (e) {
     error.value = e.message
