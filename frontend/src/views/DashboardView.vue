@@ -43,11 +43,11 @@ const liveOla = computed(() => {
   return vals.reduce((a, b) => a + b, 0) / vals.length
 })
 
-// For the chosen period: whenever the historical summary exists we use its
-// values even if 0 (no data in period = DOWN, as agreed). Only fall back to
-// the live snapshot when the summary endpoint is unavailable.
-const slaPct = computed(() => (slaOla.value ? slaOla.value.sla_pct : liveSla.value))
-const olaPct = computed(() => (slaOla.value ? slaOla.value.ola_pct : liveOla.value))
+// SLA/OLA come EXCLUSIVELY from the backend /sla-ola/summary which computes
+// UP-minutes / period-minutes (missing minute = DOWN). No live fallback:
+// online-now must never inflate a period without backfilled data.
+const slaPct = computed(() => (slaOla.value ? slaOla.value.sla_pct : null))
+const olaPct = computed(() => (slaOla.value ? slaOla.value.ola_pct : null))
 
 const cdps = computed(() => live.value?.cdp_nodes || slaOla.value?.cdp_uptime || [])
 const sites = computed(() => {

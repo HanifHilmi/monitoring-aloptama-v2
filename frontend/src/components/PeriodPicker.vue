@@ -23,6 +23,16 @@ const years = computed(() => {
 })
 const days = computed(() => daysInMonth(year.value, monthIdx.value))
 const shortMonths = MONTHS.map((m) => m.slice(0, 3))
+const weekdays = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
+const calOpen = ref(false)
+const leadingBlanks = computed(() => new Date(Date.UTC(year.value, monthIdx.value, 1)).getUTCDay())
+function calMonth(delta) {
+  let m = monthIdx.value + delta
+  let y = year.value
+  if (m < 0) { m = 11; y-- }
+  else if (m > 11) { m = 0; y++ }
+  if (y >= 2025 && y <= new Date().getUTCFullYear()) { monthIdx.value = m; year.value = y }
+}
 
 function broadcast(win) {
   emit('update:modelValue', { ...win })
@@ -103,21 +113,38 @@ if (!props.modelValue?.start) {
       </button>
     </div>
 
-    <!-- Weekly: month grid + start-day grid -->
-    <div v-else-if="category === 'weekly'" class="flex items-center gap-1">
-      <select v-model="monthIdx" class="rounded bg-runway-dark px-1 py-0.5 text-slate-200">
-        <option v-for="(m, i) in shortMonths" :key="m" :value="i">{{ m }}</option>
-      </select>
-      <div class="grid max-h-40 grid-cols-7 gap-0.5 overflow-y-auto">
-        <button
-          v-for="d in days"
-          :key="d"
-          class="h-5 w-5 rounded text-[10px] transition-colors"
-          :class="day === d ? 'bg-sky-600 text-white' : 'text-slate-300 hover:bg-runway-dark'"
-          @click="day = d"
-        >
-          {{ d }}
-        </button>
+    <!-- Weekly: calendar popover for the start date (dropdown-style) -->
+    <div v-else-if="category === 'weekly'" class="relative flex items-center gap-1">
+      <button
+        class="rounded bg-runway-dark px-2 py-0.5 text-slate-200"
+        @click="calOpen = !calOpen"
+      >
+        {{ day }} {{ shortMonths[monthIdx] }} {{ year }} ▾
+      </button>
+      <div
+        v-if="calOpen"
+        class="absolute left-0 top-full z-30 mt-1 w-56 rounded-md border border-runway-border bg-runway-panel p-2 shadow-xl"
+      >
+        <div class="mb-1 flex items-center justify-between">
+          <button class="px-1 text-slate-400 hover:text-white" @click="calMonth(-1)">‹</button>
+          <span class="text-xs font-semibold text-slate-200">{{ shortMonths[monthIdx] }} {{ year }}</span>
+          <button class="px-1 text-slate-400 hover:text-white" @click="calMonth(1)">›</button>
+        </div>
+        <div class="grid grid-cols-7 gap-0.5 text-center text-[10px] text-slate-500">
+          <span v-for="wd in weekdays" :key="wd">{{ wd }}</span>
+        </div>
+        <div class="grid grid-cols-7 gap-0.5">
+          <span v-for="(blank, i) in leadingBlanks" :key="'b'+i" />
+          <button
+            v-for="d in days"
+            :key="d"
+            class="h-6 w-6 rounded text-[10px] transition-colors"
+            :class="day === d ? 'bg-sky-600 text-white' : 'text-slate-300 hover:bg-runway-dark'"
+            @click="day = d; calOpen = false"
+          >
+            {{ d }}
+          </button>
+        </div>
       </div>
       <span class="text-slate-500">+7d</span>
     </div>

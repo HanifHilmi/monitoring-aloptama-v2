@@ -57,29 +57,33 @@ def _default_window(range_key: str, now: datetime) -> tuple[datetime, datetime]:
 
 
 async def _cdp_uptime(db: AsyncSession, node: CdpNode, start: datetime, end: datetime) -> dict:
+    """CDP uptime = UP minutes / TOTAL PERIOD minutes.
+
+    A minute WITHOUT a connectivity row counts as DOWN (missing data =
+    not delivering). This is computed entirely in SQL so the frontend never
+    does the heavy math.
+    """
     row = (
         await db.execute(
             text(
-                "SELECT COUNT(*) AS total, "
-                "COUNT(*) FILTER (WHERE reachable) AS up "
+                "SELECT COUNT(*) FILTER (WHERE reachable) AS up "
                 "FROM cdp_connectivity "
                 "WHERE cdp_id = :cid AND time >= :start AND time <= :end"
             ),
             {"cid": node.id, "start": start, "end": end},
         )
     ).one()
-    total = row.total or 0
     up = row.up or 0
-    total_secs = max((end - start).total_seconds(), 1)
-    uptime_pct = (up / total * 100.0) if total else 0.0
-    downtime = int(total_secs - (uptime_pct / 100.0 * total_secs))
+    total_minutes = max(1, int((end - start).total_seconds() // 60))
+    uptime_pct = up / total_minutes * 100.0
+    downtime_minutes = total_minutes - up
     return {
         "cdp_id": node.id,
         "name": node.name,
         "ip_address": str(node.ip_address),
         "uptime_pct": round(uptime_pct, 4),
-        "downtime_seconds": downtime,
-        "samples": total,
+        "downtime_seconds": downtime_minutes * 60,
+        "samples": up,
     }
 
 
@@ -108,18 +112,21 @@ async def _site_data_availability(db: AsyncSession, site: Site, start: datetime,
     ).all()
     stats = {r.sid: (r.total or 0, r.valid or 0) for r in rows}
 
+    total_period_minutes = max(1, int((end - start).total_seconds() // 60))
     comp_rows = []
-    overall_total = 0
+    overall_expected = 0
     overall_valid = 0
     for comp, ids in sorted(components.items()):
-        total = sum(stats.get(i, (0, 0))[0] for i in ids)
+        observed = sum(stats.get(i, (0, 0))[0] for i in ids)
         valid = sum(stats.get(i, (0, 0))[1] for i in ids)
-        pct = (valid / total * 100.0) if total else 0.0
-        comp_rows.append({"component": comp, "uptime_pct": round(pct, 4), "samples": total})
-        overall_total += total
+        # Expected = sensor-minutes for the whole period; missing = DOWN.
+        expected = len(ids) * total_period_minutes
+        pct = (valid / expected * 100.0) if expected else 0.0
+        comp_rows.append({"component": comp, "uptime_pct": round(pct, 4), "samples": observed})
+        overall_expected += expected
         overall_valid += valid
 
-    data_avail = (overall_valid / overall_total * 100.0) if overall_total else 0.0
+    data_avail = (overall_valid / overall_expected * 100.0) if overall_expected else 0.0
     return {
         "site_id": site.id,
         "slug": site.slug,
