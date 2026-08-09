@@ -69,6 +69,10 @@ function buildOption() {
 
   return {
     animation: true,
+    title: [
+      { text: cdps.value[0]?.name || 'CDP1', left: 'center', top: 0, textStyle: { color: '#e2e8f0', fontSize: 12, fontWeight: 'bold' } },
+      { text: cdps.value[1]?.name || 'CDP2', left: 'center', top: '54%', textStyle: { color: '#e2e8f0', fontSize: 12, fontWeight: 'bold' } },
+    ],
     tooltip: {
       backgroundColor: '#0b1220',
       borderColor: '#1e2a45',
@@ -103,11 +107,11 @@ function buildOption() {
         splitLine: { lineStyle: { color: '#1e293b' } },
         itemStyle: { color: '#0b1220', borderWidth: 0 },
         yearLabel: { show: false },
-        dayLabel: { color: '#94a3b8', fontSize: 9 },
+        dayLabel: { color: '#94a3b8', fontSize: 9, height: 12 },
         monthLabel: { color: '#64748b', fontSize: 10 },
       },
       {
-        top: '54%',
+        top: '58%',
         left: 40,
         right: 16,
         bottom: 32,
@@ -116,7 +120,7 @@ function buildOption() {
         splitLine: { lineStyle: { color: '#1e293b' } },
         itemStyle: { color: '#0b1220', borderWidth: 0 },
         yearLabel: { show: false },
-        dayLabel: { color: '#94a3b8', fontSize: 9 },
+        dayLabel: { color: '#94a3b8', fontSize: 9, height: 12 },
         monthLabel: { color: '#64748b', fontSize: 10 },
       },
     ],
