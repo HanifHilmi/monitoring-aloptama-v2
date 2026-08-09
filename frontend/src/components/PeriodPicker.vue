@@ -32,6 +32,17 @@ const shortMonths = MONTHS.map((m) => m.slice(0, 3))
 const days = computed(() => daysInMonth(year.value, monthIdx.value))
 const weekdays = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 const leadingBlanks = computed(() => new Date(Date.UTC(year.value, monthIdx.value, 1)).getUTCDay())
+const yearPageStart = ref(YEAR_MIN)  // first year of the visible 8-year page
+
+const yearPage = computed(() => {
+  const list = []
+  for (let y = yearPageStart.value; y <= Math.min(yearPageStart.value + 7, YEAR_MAX); y++) list.push(y)
+  return list
+})
+function navYearPage(delta) {
+  const next = yearPageStart.value + delta * 8
+  yearPageStart.value = Math.max(YEAR_MIN, Math.min(next, YEAR_MAX - 7))
+}
 
 function navPopYear(delta) {
   const idx = years.value.indexOf(year.value)
@@ -129,10 +140,32 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMouseDown))
       {{ c.label }}
     </button>
 
-    <!-- Year dropdown: scrollable 8-per-view pages (native select covers it) -->
-    <select v-model="year" @change="apply" class="rounded bg-runway-dark px-1.5 py-1 text-slate-200" size="1">
-      <option v-for="y in years" :key="y" :value="y" :disabled="y > nowYear">{{ y }}</option>
-    </select>
+    <!-- Year popover (same design as month/quarter; shares single-open) -->
+    <div v-if="category !== 'weekly'" class="relative">
+      <button class="rounded bg-runway-dark px-2 py-1 text-slate-200" @click="togglePop('year')">
+        {{ year }} ▾
+      </button>
+      <div v-if="openFor === 'year'"
+        class="absolute left-0 top-full z-30 mt-1 w-32 rounded-md border border-runway-border bg-runway-panel p-2 shadow-xl">
+        <div class="mb-1 flex items-center justify-between">
+          <button class="px-1 text-slate-400 hover:text-white" @click="navYearPage(-1)">‹</button>
+          <span class="text-xs font-semibold text-slate-200">{{ yearPageStart }}–{{ Math.min(yearPageStart + 7, YEAR_MAX) }}</span>
+          <button class="px-1 text-slate-400 hover:text-white" :disabled="yearPageStart + 8 > YEAR_MAX" @click="navYearPage(1)">›</button>
+        </div>
+        <div class="grid grid-cols-2 gap-0.5">
+          <button
+            v-for="y in yearPage"
+            :key="y"
+            class="rounded px-1 py-1 text-[11px] transition-colors"
+            :disabled="y > nowYear"
+            :class="year === y ? 'bg-sky-600 text-white' : y > nowYear ? 'text-slate-700 cursor-not-allowed' : 'text-slate-300 hover:bg-runway-dark'"
+            @click="year = y; apply(); openFor = null"
+          >
+            {{ y }}
+          </button>
+        </div>
+      </div>
+    </div>
 
     <!-- Monthly popover -->
     <div v-if="category === 'monthly'" class="relative">
