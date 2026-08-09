@@ -1,6 +1,7 @@
 <script setup>
 import { api } from '@/api/client'
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, onBeforeUnmount } from 'vue'
+import { formatDateTime } from '@/utils/timezone'
 import EChart from '@/components/EChart.vue'
 
 const range = ref('month')
@@ -11,6 +12,10 @@ const slaOla = ref(null)        // /sla-ola/summary (historical)
 const history = ref([])
 const timer = ref(null)
 const error = ref(null)
+const tzTick = ref(0)
+function onTzChange() { tzTick.value++ }
+onMounted(() => window.addEventListener('tzchange', onTzChange))
+onBeforeUnmount(() => window.removeEventListener('tzchange', onTzChange))
 
 // ---- Live SLA/OLA (always available from real-time status) ----
 const liveSla = computed(() => {
@@ -144,7 +149,7 @@ onUnmounted(() => clearInterval(timer.value))
             </div>
             <div class="rounded bg-runway-dark px-2 py-1">
               <div class="text-slate-500">Last seen</div>
-              <div class="font-semibold text-slate-200">{{ c.last_seen || c.last_check ? new Date(c.last_seen || c.last_check).toLocaleTimeString() : '—' }}</div>
+              <div class="font-semibold text-slate-200">{{ formatDateTime(c.last_seen || c.last_check) }}<span v-if="tzTick >= 0" class="hidden" /></div>
             </div>
           </div>
         </div>

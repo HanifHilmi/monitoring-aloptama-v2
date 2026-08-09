@@ -62,10 +62,35 @@ PROBE_PORTS = [80, 443, 22, 2049]
 
 
 async def _probe_host(ip: str, timeout: float) -> tuple[bool, Optional[float], Optional[str]]:
-    """Instant TCP-connect liveness probe (network ping equivalent).
+    """Live CDP reachability: ICMP ping first, TCP-connect fallback.
 
-    Returns (reachable, rtt_ms, error_message). First port that opens wins.
+    The host operator can always `ping` the CDPs, so we mirror that with the
+    system ping binary (works from inside the container even when TCP ports
+    80/443/22/2049 are firewalled). If ping is unavailable, fall back to
+    trying the probe ports.
     """
+    import shutil
+
+    # 1) ICMP ping (system binary) - matches the host's reachability.
+    if shutil.which("ping"):
+        try:
+            start = asyncio.get_event_loop().time()
+            proc = await asyncio.wait_for(
+                asyncio.create_subprocess_exec(
+                    "ping", "-c", "1", "-W", str(max(1, int(timeout))), ip,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                ),
+                timeout=timeout + 1.0,
+            )
+            rc = await proc.wait()
+            if rc == 0:
+                rtt_ms = (asyncio.get_event_loop().time() - start) * 1000.0
+                return True, round(rtt_ms, 2), None
+        except (OSError, asyncio.TimeoutError):
+            pass
+
+    # 2) TCP connect fallback: first open port wins.
     last_error = "no probe ports configured"
     for port in PROBE_PORTS:
         try:
