@@ -265,7 +265,8 @@ async def downtime_map(
                 "SELECT cdp_id, date_trunc('day', time) AS d, "
                 "COUNT(*) FILTER (WHERE reachable) AS up "
                 "FROM cdp_connectivity "
-                "WHERE time >= :start AND time < :end GROUP BY cdp_id, 1"
+                "WHERE time >= :start AND time < :end "
+                "GROUP BY cdp_id, date_trunc('day', time)"
             ),
             {"start": start, "end": end},
         )
