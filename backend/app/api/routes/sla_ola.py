@@ -25,7 +25,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.models import CdpNode, Site
+from app.models import CdpNode, Sensor, Site
 
 router = APIRouter(prefix="/sla-ola", tags=["sla-ola"])
 
@@ -88,7 +88,14 @@ async def _cdp_uptime(db: AsyncSession, node: CdpNode, start: datetime, end: dat
 
 
 async def _site_data_availability(db: AsyncSession, site: Site, start: datetime, end: datetime) -> dict:
-    sensors = [s for s in site.sensors if s.is_enabled]
+    # Query sensors explicitly — accessing the lazy relationship
+    # (site.sensors) inside sync list-comprehension triggers an async
+    # MissingGreenlet (500) on the deployed backend.
+    sensors = (
+        await db.execute(
+            select(Sensor).where(Sensor.site_id == site.id, Sensor.is_enabled.is_(True))
+        )
+    ).scalars().all()
     if not sensors:
         return {"site_id": site.id, "slug": site.slug, "code": site.code, "name": site.name,
                 "data_availability_pct": 0.0, "components": []}
