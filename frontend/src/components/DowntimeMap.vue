@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { api } from '@/api/client'
 import EChart from '@/components/EChart.vue'
 
@@ -8,32 +8,15 @@ const year = ref(new Date().getUTCFullYear())
 const loading = ref(false)
 const Y_MIN = 2026
 const Y_MAX = new Date().getUTCFullYear()
-const yearOpen = ref(false)
-const yearPageStart = ref(Y_MIN)
-const years = new Array(Y_MAX - Y_MIN + 1).fill(0).map((_, i) => Y_MIN + i)
-
-function yearPage() {
-  return years.slice(yearPageStart.value - Y_MIN, (yearPageStart.value - Y_MIN) + 8)
-}
-function navYearPage(delta) {
-  const idx = yearPageStart.value - Y_MIN + delta * 8
-  yearPageStart.value = Math.max(Y_MIN, Math.min(Y_MAX - 7, Y_MIN + idx))
-}
-function pickYear(y, ev) {
-  year.value = y
-  yearOpen.value = false
-  load()
-  ev.stopPropagation()
-}
+let timer = null
 
 async function load() {
   loading.value = true
   try {
     const d = await api.getDowntimeMap(year.value)
     let list = d.cdps || []
+    // Zero-fill fallback so the chart always renders even before backfill.
     if (!list.length) {
-      // No backfilled data yet: build zero-filled heatmaps from the known
-      // CDP nodes so the calendar graphs always render (all days = 0 min).
       const ov = await api.getStatusOverview().catch(() => null)
       const nodes = ov?.cdp_nodes || [
         { cdp_id: 1, name: 'CDP1' },
@@ -48,7 +31,6 @@ async function load() {
     }
     cdps.value = list
   } catch {
-    // Keep whatever we had (or fall back to zeros).
     if (!cdps.value.length) {
       cdps.value = [
         { cdp_id: 1, name: 'CDP1', days: zeroDaysFor(year.value).map((day) => ({ day, downtime_minutes: 0 })) },
@@ -75,12 +57,11 @@ function zeroDaysFor(y) {
   return out
 }
 
-// Build an ECharts calendar-heatmap option for one CDP node.
-function buildHeatmap(cdp) {
+// One combined option: CDP1 + CDP2 calendars + one shared PIECEWISE visualMap.
+function buildOption() {
   const startDate = `${year.value}-01-01`
   const endDate = `${year.value}-12-31`
-  const data = (cdp.days || []).map((r) => [r.day, r.downtime_minutes])
-  const maxDown = Math.max(2, ...data.map(([, v]) => v))
+  const byIndex = (i) => (cdps.value[i]?.days || []).map((r) => [r.day, r.downtime_minutes])
 
   return {
     animation: true,
@@ -93,41 +74,90 @@ function buildHeatmap(cdp) {
         return `${params.value[0]}: <b>${val}</b> down`
       },
     },
+    // Piecewise visualMap (no slider): fixed downtime buckets.
     visualMap: {
-      min: 0,
-      max: maxDown,
-      calculable: true,
+      type: 'piecewise',
       orient: 'horizontal',
       left: 'center',
       bottom: 0,
-      text: ['More', 'Less'],
       textStyle: { color: '#94a3b8', fontSize: 10 },
-      inRange: { color: ['#0f172a', '#3b0764', '#9d174d', '#f43f5e'] },
+      pieces: [
+        { value: 0, label: '0', color: '#0f172a' },
+        { lte: 59, min: 1, label: '1–59', color: '#fca5a5' },      // light red
+        { lte: 359, min: 60, label: '60–359', color: '#ef4444' },  // medium red
+        { min: 360, label: '360+', color: '#7f1d1d' },             // dark red
+      ],
     },
-    calendar: {
-      top: 20,
-      left: 10,
-      right: 10,
-      bottom: 60,
-      cellSize: ['auto', 16],
-      range: [startDate, endDate],
-      splitLine: { show: true, lineStyle: { color: '#1e293b' } },
-      itemStyle: { color: '#0b1220', borderWidth: 0 },
-      yearLabel: { show: false },
-      dayLabel: { color: '#64748b', fontSize: 10 },
-      monthLabel: { color: '#64748b', fontSize: 10 },
-    },
+    calendar: [
+      {
+        top: 16,
+        left: 34,
+        right: 16,
+        bottom: '52%',
+        cellSize: ['auto', 14],
+        range: [startDate, endDate],
+        splitLine: { lineStyle: { color: '#1e293b' } },
+        itemStyle: { color: '#0b1220', borderWidth: 0 },
+        yearLabel: { show: false },
+        dayLabel: { color: '#94a3b8', fontSize: 9 },
+        monthLabel: { color: '#64748b', fontSize: 10 },
+      },
+      {
+        top: '54%',
+        left: 34,
+        right: 16,
+        bottom: 32,
+        cellSize: ['auto', 14],
+        range: [startDate, endDate],
+        splitLine: { lineStyle: { color: '#1e293b' } },
+        itemStyle: { color: '#0b1220', borderWidth: 0 },
+        yearLabel: { show: false },
+        dayLabel: { color: '#94a3b8', fontSize: 9 },
+        monthLabel: { color: '#64748b', fontSize: 10 },
+      },
+    ],
     series: [
       {
+        name: cdps.value[0]?.name || 'CDP1',
         type: 'heatmap',
         coordinateSystem: 'calendar',
-        data,
+        calendarIndex: 0,
+        data: byIndex(0),
+      },
+      {
+        name: cdps.value[1]?.name || 'CDP2',
+        type: 'heatmap',
+        coordinateSystem: 'calendar',
+        calendarIndex: 1,
+        data: byIndex(1),
       },
     ],
   }
 }
 
-onMounted(load)
+// ---- Year picker (matches other sections) ----
+const yearOpen = ref(false)
+const yearPageStart = ref(Y_MIN)
+const years = new Array(Y_MAX - Y_MIN + 1).fill(0).map((_, i) => Y_MIN + i)
+function yearPage() {
+  return years.slice(yearPageStart.value - Y_MIN, yearPageStart.value - Y_MIN + 8)
+}
+function navYearPage(delta) {
+  const idx = yearPageStart.value - Y_MIN + delta * 8
+  yearPageStart.value = Math.max(Y_MIN, Math.min(Y_MAX - 7, Y_MIN + idx))
+}
+function pickYear(y) {
+  year.value = y
+  yearOpen.value = false
+  load()
+}
+
+onMounted(() => {
+  load()
+  // Auto-refresh so newly persisted connectivity updates the heatmaps.
+  timer = setInterval(load, 30_000)
+})
+onBeforeUnmount(() => clearInterval(timer))
 </script>
 
 <template>
@@ -150,7 +180,7 @@ onMounted(load)
               :key="y"
               class="rounded px-1 py-1 text-[11px] transition-colors"
               :class="year === y ? 'bg-sky-600 text-white' : 'text-slate-300 hover:bg-runway-dark'"
-              @click="pickYear(y, )"
+              @click="pickYear(y)"
             >
               {{ y }}
             </button>
@@ -160,14 +190,9 @@ onMounted(load)
     </div>
 
     <div v-if="loading" class="py-12 text-center text-xs text-slate-500">Loading…</div>
-
-    <!-- Always render the heatmaps; days with 0 downtime stay dark,
-         and when there are no CDP nodes yet the grid is simply empty. -->
-    <div v-else class="space-y-6">
-      <div v-for="c in cdps" :key="c.cdp_id" class="panel">
-        <div class="mb-1 font-mono text-xs font-semibold text-slate-200">{{ c.name }}</div>
-        <EChart :option="buildHeatmap(c)" height="190px" />
-      </div>
+    <div v-else class="panel">
+      <!-- One combined chart: CDP1 (top) + CDP2 (bottom), shared piecewise legend -->
+      <EChart :option="buildOption()" height="460px" />
     </div>
   </div>
 </template>
