@@ -75,8 +75,8 @@ async def _cdp_uptime(db: AsyncSession, node: CdpNode, start: datetime, end: dat
     ).one()
     up = row.up or 0
     total_minutes = max(1, int((end - start).total_seconds() // 60))
-    uptime_pct = up / total_minutes * 100.0
-    downtime_minutes = total_minutes - up
+    uptime_pct = min(100.0, up / total_minutes * 100.0)
+    downtime_minutes = max(0, total_minutes - up)
     return {
         "cdp_id": node.id,
         "name": node.name,
