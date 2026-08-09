@@ -59,10 +59,21 @@ const cdps = computed(() => {
   })
 })
 // Sites — Data Availability tied to the CDP Uptime period picker
-// (cdpOla summary already uses the same start/end, missing = DOWN).
+// (cdpOla summary provides period-based %, missing=DOWN). Sensor dots
+// come from the live overview so the per-sensor indicators always show.
 const sites = computed(() => {
-  const hist = cdpOla.value?.sites || []
-  if (hist.length) return hist
+  const liveBySlug = {}
+  for (const s of live.value?.sites || []) liveBySlug[s.slug] = s
+  const fromHist = (cdpOla.value?.sites || [])
+    .map((s) => ({
+      site_id: s.site_id ?? s.id,
+      slug: s.slug,
+      code: s.code,
+      name: s.name,
+      data_availability_pct: s.data_availability_pct ?? 0,
+      sensors: liveBySlug[s.slug]?.sensors || [],
+    }))
+  if (fromHist.length) return fromHist
   // fallback: live overview (sensor health) when no historical summary yet
   return (live.value?.sites || []).map((s) => ({
     site_id: s.id,

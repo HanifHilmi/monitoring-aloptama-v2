@@ -86,10 +86,9 @@ onMounted(load)
     </div>
 
     <div v-if="loading" class="py-12 text-center text-xs text-slate-500">Loading…</div>
-    <div v-else-if="!cdps.length" class="py-12 text-center text-xs text-slate-500">
-      No downtime data yet — run Backfill CDP uptime
-    </div>
 
+    <!-- Always render the heatmaps; days with 0 downtime stay dark,
+         and when there are no CDP nodes yet the grid is simply empty. -->
     <div v-else class="grid gap-6 xl:grid-cols-2">
       <div v-for="c in cdps" :key="c.cdp_id" class="panel">
         <div class="mb-1 font-mono text-xs font-semibold text-slate-200">{{ c.name }}</div>
