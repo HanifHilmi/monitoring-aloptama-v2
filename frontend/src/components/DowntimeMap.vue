@@ -58,23 +58,33 @@ function zeroDaysFor(y) {
   return out
 }
 
-// One chart per CDP node: each has its OWN calendar box tall enough for
-// square cells, a title above it, and an identical piecewise visualMap.
-// (Previously two calendars shared one chart — ECharts auto-size made one
-//  stretch and the other shrink/overlap the title.)
-function buildOption(cdp) {
+// ONE option: single card, both CDP calendars stacked (top half / bottom half).
+// cellSize: ['auto', 10] FIXES the cell height to a small value; width is
+// auto (derived to fit the wide box), so cells are square-or-WIDER — never
+// vertically stretched. Compact card height keeps the graphs small.
+function buildOption() {
   const startDate = `${year.value}-01-01`
   const endDate = `${year.value}-12-31`
-  const data = (cdp.days || []).map((r) => [r.day, r.downtime_minutes])
+  const byIndex = (i) => (cdps.value[i]?.days || []).map((r) => [r.day, r.downtime_minutes])
+
+  const calendarBase = {
+    left: 36,
+    right: 12,
+    cellSize: ['auto', 10],
+    range: [startDate, endDate],
+    splitLine: { lineStyle: { color: '#1e293b' } },
+    itemStyle: { color: '#0b1220', borderWidth: 0 },
+    yearLabel: { show: false },
+    dayLabel: { color: '#94a3b8', fontSize: 8, height: 10 },
+    monthLabel: { color: '#64748b', fontSize: 9 },
+  }
 
   return {
     animation: true,
-    title: {
-      text: cdp.name || '',
-      left: 'center',
-      top: 0,
-      textStyle: { color: '#e2e8f0', fontSize: 13, fontWeight: 'bold' },
-    },
+    title: [
+      { text: cdps.value[0]?.name || 'CDP1', left: 'center', top: 8, textStyle: { color: '#e2e8f0', fontSize: 12, fontWeight: 'bold' } },
+      { text: cdps.value[1]?.name || 'CDP2', left: 'center', top: '50%', textStyle: { color: '#e2e8f0', fontSize: 12, fontWeight: 'bold' } },
+    ],
     tooltip: {
       backgroundColor: '#0b1220',
       borderColor: '#1e2a45',
@@ -98,24 +108,24 @@ function buildOption(cdp) {
         { min: 360, label: '360+', color: 'rgba(239,68,68,1)' },
       ],
     },
-    calendar: {
-      top: 28,
-      left: 40,
-      right: 16,
-      bottom: 40,
-      cellSize: 'auto',
-      range: [startDate, endDate],
-      splitLine: { lineStyle: { color: '#1e293b' } },
-      itemStyle: { color: '#0b1220', borderWidth: 0 },
-      yearLabel: { show: false },
-      dayLabel: { color: '#94a3b8', fontSize: 9, height: 12 },
-      monthLabel: { color: '#64748b', fontSize: 10 },
-    },
+    calendar: [
+      { ...calendarBase, top: 34, bottom: '50%' },
+      { ...calendarBase, top: '52%', bottom: 26 },
+    ],
     series: [
       {
+        name: cdps.value[0]?.name || 'CDP1',
         type: 'heatmap',
         coordinateSystem: 'calendar',
-        data,
+        calendarIndex: 0,
+        data: byIndex(0),
+      },
+      {
+        name: cdps.value[1]?.name || 'CDP2',
+        type: 'heatmap',
+        coordinateSystem: 'calendar',
+        calendarIndex: 1,
+        data: byIndex(1),
       },
     ],
   }
@@ -176,11 +186,9 @@ onBeforeUnmount(() => clearInterval(timer))
 
     <div v-if="loading" class="py-12 text-center text-xs text-slate-500">Loading…</div>
     <div v-else-if="!cdps.length" class="py-12 text-center text-xs text-slate-500">No CDP nodes</div>
-    <!-- One full-width card per CDP: own box, own square cells, own title -->
-    <div v-else class="space-y-6">
-      <div v-for="c in cdps" :key="c.cdp_id" class="panel">
-        <EChart :option="buildOption(c)" height="300px" />
-      </div>
+    <!-- ONE card: CDP1 (top half) + CDP2 (bottom half), shared piecewise legend -->
+    <div v-else class="panel">
+      <EChart :option="buildOption()" height="340px" />
     </div>
   </div>
 </template>
