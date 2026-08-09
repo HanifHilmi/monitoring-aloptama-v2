@@ -2,6 +2,7 @@
 import { api } from '@/api/client'
 import { computed, onMounted, onUnmounted, ref, onBeforeUnmount } from 'vue'
 import { formatDateTime } from '@/utils/timezone'
+import { buildUptimeStateMapOption } from '@/utils/chart'
 import EChart from '@/components/EChart.vue'
 
 const range = ref('month')
@@ -10,6 +11,7 @@ const span = ref('month')
 const live = ref(null)          // /status/overview (real-time)
 const slaOla = ref(null)        // /sla-ola/summary (historical)
 const history = ref([])
+const connectivity = ref({})   // cdp_id -> samples[]
 const timer = ref(null)
 const error = ref(null)
 const tzTick = ref(0)
@@ -55,6 +57,24 @@ const sites = computed(() => {
   return slaOla.value?.sites || []
 })
 
+const cdpStateMaps = computed(() => {
+  const end = new Date().toISOString()
+  const start = new Date(Date.now() - 24 * 3600 * 1000).toISOString()
+  const maps = {}
+  for (const c of cdps.value) {
+    const id = c.cdp_id ?? c.id
+    const samples = (connectivity.value[id] || []).map((s) => ({
+      time: s.time,
+      reachable: s.reachable === true,
+    }))
+    maps[id] = {
+      option: buildUptimeStateMapOption({ samples, startIso: start, endIso: end }),
+      has: samples.length > 0,
+    }
+  }
+  return maps
+})
+
 const historyOption = computed(() => {
   const rows = [...history.value].sort((a, b) => a.day.localeCompare(b.day))
   return {
@@ -71,6 +91,22 @@ const historyOption = computed(() => {
   }
 })
 
+async function loadCdpConnectivity() {
+  try {
+    const nodes = live.value?.cdp_nodes || []
+    const entries = await Promise.all(
+      nodes.map(async (c) => {
+        const id = c.cdp_id ?? c.id
+        const data = await api.getCdpConnectivity(id, 24).catch(() => ({ samples: [] }))
+        return [id, data.samples || []]
+      }),
+    )
+    connectivity.value = Object.fromEntries(entries)
+  } catch {
+    connectivity.value = {}
+  }
+}
+
 async function load() {
   try {
     const [lv, so, h] = await Promise.all([
@@ -85,6 +121,7 @@ async function load() {
   } catch (e) {
     error.value = e.message
   }
+  await loadCdpConnectivity()
 }
 
 onMounted(() => {
@@ -154,6 +191,31 @@ onUnmounted(() => clearInterval(timer.value))
           </div>
         </div>
         <div v-if="!cdps.length" class="panel text-center text-sm text-slate-500">No CDP nodes configured</div>
+      </div>
+
+      <!-- CDP uptime history (state-map) -->
+      <div v-if="cdps.length" class="mt-4">
+        <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Uptime History (24h)</h3>
+        <div class="grid gap-4 md:grid-cols-2">
+          <div
+            v-for="c in cdps"
+            :key="'map-' + (c.cdp_id ?? c.id)"
+            class="panel"
+          >
+            <div class="mb-1 flex items-center justify-between">
+              <span class="font-mono text-xs font-semibold text-slate-200">{{ c.name }}</span>
+              <span class="text-xs text-slate-400">{{ c.ip_address || c.ip }}</span>
+            </div>
+            <EChart
+              v-if="cdpStateMaps[c.cdp_id ?? c.id]?.has"
+              :option="cdpStateMaps[c.cdp_id ?? c.id].option"
+              height="90px"
+            />
+            <div v-else class="flex h-[90px] items-center justify-center text-xs text-slate-500">
+              No history yet — run Backfill CDP uptime
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 

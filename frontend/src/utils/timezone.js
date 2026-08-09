@@ -25,3 +25,18 @@ export function formatDateTime(iso) {
     `${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())}:${pad(t.getUTCSeconds())} ${state.tz}`
   )
 }
+
+// Short "HH:MM:SS UTC/WIB" formatter for chart tooltips (ECharts
+// axisPointer/axisLabel formatters receive a timestamp string/number).
+export function tooltipTime(iso) {
+  if (!iso) return '—'
+  let ts = iso
+  if (typeof iso === 'number') ts = new Date(iso).toISOString()
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return '—'
+  const t = new Date(d.getTime() + (state.tz === 'WIB' ? 7 * 3600 * 1000 : 0))
+  return (
+    `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())} ` +
+    `${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())}:${pad(t.getUTCSeconds())} ${state.tz}`
+  )
+}

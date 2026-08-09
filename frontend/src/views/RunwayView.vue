@@ -1,7 +1,7 @@
 <script setup>
 import { api } from '@/api/client'
-import { fmtTime, statusColor } from '@/utils/format'
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { formatDateTime } from '@/utils/timezone'
+import { computed, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue'
 import SensorCard from '@/components/SensorCard.vue'
 
 const props = defineProps({
@@ -11,12 +11,21 @@ const props = defineProps({
 const overview = ref(null)
 const timer = ref(null)
 const range = ref('24h')  // unified time range for all sensor cards
+const tzTick = ref(0)
+function onTzChange() { tzTick.value++ }
+onMounted(() => window.addEventListener('tzchange', onTzChange))
+onBeforeUnmount(() => window.removeEventListener('tzchange', onTzChange))
 
 const site = computed(() =>
   (overview.value?.sites || []).find((s) => s.slug === props.siteSlug),
 )
 
 const sensors = computed(() => (site.value?.sensors || []).filter((s) => s.is_enabled !== false))
+
+const lastSampleIso = computed(() => {
+  const ts = Math.max(0, ...sensors.value.map((s) => new Date(s.last_sample_time || 0).getTime()))
+  return ts ? new Date(ts).toISOString() : null
+})
 
 async function loadOverview() {
   try {
@@ -60,7 +69,7 @@ onUnmounted(() => clearInterval(timer.value))
         <div class="panel">
           <div class="text-xs text-slate-500">Last sample</div>
           <div class="mt-1 text-2xl font-semibold text-sky-400">
-            {{ fmtTime(Math.max(...sensors.map((s) => new Date(s.last_sample_time || 0)))) }}
+            {{ formatDateTime(lastSampleIso) }}<span v-if="tzTick >= 0" class="hidden" />
           </div>
         </div>
         <div class="panel">

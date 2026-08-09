@@ -1,4 +1,4 @@
-import { displayTime } from './timezone'
+import { tooltipTime } from './timezone'
 
 const AXIS_COLOR = '#64748b'
 const SPLIT_COLOR = 'rgba(148, 163, 184, 0.12)'
@@ -13,7 +13,17 @@ function baseTooltip() {
     backgroundColor: '#0b1220',
     borderColor: '#1e2a45',
     textStyle: { color: '#e2e8f0', fontSize: 12 },
-    axisPointer: { type: 'cross', lineStyle: { color: '#334155' } },
+    axisPointer: {
+      type: 'cross',
+      lineStyle: { color: '#334155' },
+      // Crosshair label: display the hovered time in the selected zone.
+      label: {
+        formatter: (p) => tooltipTime(p.value),
+        backgroundColor: '#1e2a45',
+        color: '#e2e8f0',
+        fontSize: 11,
+      },
+    },
   }
 }
 
@@ -30,10 +40,7 @@ export function buildTimeSeriesOption({ times, series, unit = '', color = '#38bd
     animationEasing: 'linear',
     animationEasingUpdate: 'linear',
     grid: baseGrid(),
-    tooltip: {
-      ...baseTooltip(),
-      valueFormatter: (v) => (v === null || v === undefined ? '—' : `${v}${unit ? ` ${unit}` : ''}`),
-    },
+    tooltip: baseTooltip(),
     xAxis: {
       type: 'time',
       axisLine: { lineStyle: { color: AXIS_COLOR } },
@@ -62,7 +69,7 @@ export function buildTimeSeriesOption({ times, series, unit = '', color = '#38bd
   }
 }
 
-// Dual-axis line chart (ATRH TEMP/RH, ANEM WS/WD). Honours UTC/WIB shift.
+// Dual-axis line chart (ATRH TEMP/RH, ANEM WS/WD).
 export function buildDualAxisOption({ left, right, leftName = '', rightName = '' }) {
   return {
     animation: true,
@@ -71,7 +78,7 @@ export function buildDualAxisOption({ left, right, leftName = '', rightName = ''
     animationEasing: 'linear',
     animationEasingUpdate: 'linear',
     grid: baseGrid(),
-    tooltip: { ...baseTooltip() },
+    tooltip: baseTooltip(),
     xAxis: {
       type: 'time',
       axisLine: { lineStyle: { color: AXIS_COLOR } },
@@ -124,7 +131,7 @@ export function buildDotOption({ points, name = '', color = '#34d399' }) {
     animation: true,
     animationDuration: 500,
     grid: baseGrid(),
-    tooltip: { ...baseTooltip() },
+    tooltip: baseTooltip(),
     xAxis: {
       type: 'time',
       axisLine: { lineStyle: { color: AXIS_COLOR } },
@@ -145,6 +152,65 @@ export function buildDotOption({ points, name = '', color = '#34d399' }) {
         data: points.map((p) => [shift(p.time), p.value]),
         symbolSize: 5,
         itemStyle: { color },
+      },
+    ],
+  }
+}
+
+// CDP uptime state-map: green=UP, red=DOWN over the sampled history.
+export function buildUptimeStateMapOption({ samples, startIso, endIso }) {
+  const bands = []
+  let runStart = null
+  let runUp = null
+  for (const s of samples) {
+    if (s.reachable === runUp) continue
+    if (runStart !== null) {
+      bands.push({ start: runStart, end: s.time, up: runUp })
+    }
+    runStart = s.time
+    runUp = s.reachable
+  }
+  if (runStart !== null) {
+    bands.push({ start: runStart, end: endIso, up: runUp })
+  }
+  const markAreaData = bands
+    .filter((b) => b.end > b.start)
+    .map((b) => [
+      { xAxis: b.start, itemStyle: { color: b.up ? '#10b981' : '#ef4444', opacity: b.up ? 0.15 : 0.35 } },
+      { xAxis: b.end, itemStyle: { color: b.up ? '#10b981' : '#ef4444', opacity: 0 } },
+    ])
+
+  return {
+    animation: true,
+    animationDuration: 400,
+    grid: baseGrid(),
+    tooltip: {
+      ...baseTooltip(),
+      formatter() {
+        return `Uptime state-map · ${startIso} → ${endIso} (${tooltipTime(startIso)} – ${tooltipTime(endIso)})`
+      },
+    },
+    xAxis: {
+      type: 'time',
+      min: startIso,
+      max: endIso,
+      axisLine: { lineStyle: { color: AXIS_COLOR } },
+      axisLabel: { color: AXIS_COLOR, fontSize: 11 },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: 'category',
+      data: ['DOWN', 'UP'],
+      axisLabel: { color: AXIS_COLOR, fontSize: 11 },
+      splitLine: { show: false },
+    },
+    series: [
+      {
+        type: 'line',
+        data: [],
+        showSymbol: false,
+        lineStyle: { color: '#10b981', width: 2 },
+        markArea: { silent: true, data: markAreaData },
       },
     ],
   }
