@@ -31,7 +31,7 @@ function baseTooltip() {
 // ECharts' root `timezone` option in EChart.vue, so no client-side shift.
 const shift = (t) => new Date(t).toISOString()
 
-export function buildTimeSeriesOption({ times, series, unit = '', color = '#38bdf8' }) {
+export function buildTimeSeriesOption({ times, series, unit = '', color = '#38bdf8', xMin = null, xMax = null }) {
   const shifted = times.map(shift)
   return {
     animation: true,
@@ -43,6 +43,8 @@ export function buildTimeSeriesOption({ times, series, unit = '', color = '#38bd
     tooltip: baseTooltip(),
     xAxis: {
       type: 'time',
+      min: xMin,
+      max: xMax,
       axisLine: { lineStyle: { color: AXIS_COLOR } },
       axisLabel: { color: AXIS_COLOR, fontSize: 11 },
       splitLine: { show: false },
@@ -70,7 +72,7 @@ export function buildTimeSeriesOption({ times, series, unit = '', color = '#38bd
 }
 
 // Dual-axis line chart (ATRH TEMP/RH, ANEM WS/WD).
-export function buildDualAxisOption({ left, right, leftName = '', rightName = '' }) {
+export function buildDualAxisOption({ left, right, leftName = '', rightName = '', xMin = null, xMax = null }) {
   return {
     animation: true,
     animationDuration: 500,
@@ -81,6 +83,8 @@ export function buildDualAxisOption({ left, right, leftName = '', rightName = ''
     tooltip: baseTooltip(),
     xAxis: {
       type: 'time',
+      min: xMin,
+      max: xMax,
       axisLine: { lineStyle: { color: AXIS_COLOR } },
       axisLabel: { color: AXIS_COLOR, fontSize: 11 },
       splitLine: { show: false },
@@ -126,7 +130,7 @@ export function buildDualAxisOption({ left, right, leftName = '', rightName = ''
 }
 
 // Dot (scatter) chart for ceilometer LR1 (zeros excluded by caller).
-export function buildDotOption({ points, name = '', color = '#34d399' }) {
+export function buildDotOption({ points, name = '', color = '#34d399', xMin = null, xMax = null }) {
   return {
     animation: true,
     animationDuration: 500,
@@ -134,6 +138,8 @@ export function buildDotOption({ points, name = '', color = '#34d399' }) {
     tooltip: baseTooltip(),
     xAxis: {
       type: 'time',
+      min: xMin,
+      max: xMax,
       axisLine: { lineStyle: { color: AXIS_COLOR } },
       axisLabel: { color: AXIS_COLOR, fontSize: 11 },
       splitLine: { show: false },

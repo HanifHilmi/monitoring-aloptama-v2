@@ -1,11 +1,13 @@
 <script setup>
 import { api } from '@/api/client'
-import { computed, onMounted, onUnmounted, ref, onBeforeUnmount } from 'vue'
+import { computed, onBeforeUnmount, onMounted, onUnmounted, ref } from 'vue'
 import { formatDateTime } from '@/utils/timezone'
 import { buildUptimeStateMapOption } from '@/utils/chart'
+import { presetWindow } from '@/utils/range'
 import EChart from '@/components/EChart.vue'
+import RangePicker from '@/components/RangePicker.vue'
 
-const range = ref('month')
+const range = ref(presetWindow('month'))   // { key, start, end } (UTC)
 const bucket = ref('daily')
 const span = ref('month')
 const live = ref(null)          // /status/overview (real-time)
@@ -42,7 +44,6 @@ const olaPct = computed(() => slaOla.value?.ola_pct ?? liveOla.value)
 
 const cdps = computed(() => live.value?.cdp_nodes || slaOla.value?.cdp_uptime || [])
 const sites = computed(() => {
-  // Real-time site sensor health from /status/overview.
   const liveSites = (live.value?.sites || []).map((s) => ({
     site_id: s.id,
     slug: s.slug,
@@ -58,8 +59,8 @@ const sites = computed(() => {
 })
 
 const cdpStateMaps = computed(() => {
-  const end = new Date().toISOString()
-  const start = new Date(Date.now() - 24 * 3600 * 1000).toISOString()
+  const end = range.value.end
+  const start = range.value.start
   const maps = {}
   for (const c of cdps.value) {
     const id = c.cdp_id ?? c.id
@@ -75,6 +76,8 @@ const cdpStateMaps = computed(() => {
   return maps
 })
 
+// SLA/OLA history as BAR chart, x-axis pinned to the selected window
+// (renders empty grid when no data in range).
 const historyOption = computed(() => {
   const rows = [...history.value].sort((a, b) => a.day.localeCompare(b.day))
   return {
@@ -82,11 +85,16 @@ const historyOption = computed(() => {
     grid: { left: 12, right: 16, top: 24, bottom: 0, containLabel: true },
     tooltip: { trigger: 'axis' },
     legend: { textStyle: { color: '#94a3b8' }, top: 0 },
-    xAxis: { type: 'time', axisLabel: { color: '#64748b', fontSize: 11 } },
+    xAxis: {
+      type: 'time',
+      min: range.value.start,
+      max: range.value.end,
+      axisLabel: { color: '#64748b', fontSize: 11 },
+    },
     yAxis: { type: 'value', min: 0, max: 100, axisLabel: { color: '#64748b', fontSize: 11, formatter: '{value}%' } },
     series: [
-      { name: 'SLA', type: 'line', showSymbol: false, data: rows.map((r) => [r.day, r.sla_pct]), lineStyle: { color: '#10b981' }, itemStyle: { color: '#10b981' } },
-      { name: 'OLA', type: 'line', showSymbol: false, data: rows.map((r) => [r.day, r.ola_pct]), lineStyle: { color: '#38bdf8' }, itemStyle: { color: '#38bdf8' } },
+      { name: 'SLA', type: 'bar', data: rows.map((r) => [r.day, r.sla_pct]), itemStyle: { color: '#10b981', opacity: 0.75 } },
+      { name: 'OLA', type: 'bar', data: rows.map((r) => [r.day, r.ola_pct]), itemStyle: { color: '#38bdf8', opacity: 0.55 } },
     ],
   }
 })
@@ -111,8 +119,8 @@ async function load() {
   try {
     const [lv, so, h] = await Promise.all([
       api.getStatusOverview(),
-      api.getAvailability(range.value).catch(() => null),
-      api.getAvailabilityHistory(bucket.value, span.value).catch(() => ({ rows: [] })),
+      api.getAvailability(range.value.key, range.value).catch(() => null),
+      api.getAvailabilityHistory(bucket.value, span.value, range.value).catch(() => ({ rows: [] })),
     ])
     live.value = lv
     slaOla.value = so
@@ -126,7 +134,7 @@ async function load() {
 
 onMounted(() => {
   load()
-  timer.value = setInterval(load, 15_000)  // real-time refresh
+  timer.value = setInterval(load, 15_000)
 })
 onUnmounted(() => clearInterval(timer.value))
 </script>
@@ -135,10 +143,10 @@ onUnmounted(() => clearInterval(timer.value))
   <div class="space-y-6">
     <p v-if="error" class="rounded bg-red-500/10 px-3 py-2 text-xs text-red-400">{{ error }}</p>
 
-    <!-- Row 1: SLA & OLA percentages (live) -->
-    <div class="flex items-center justify-between">
+    <!-- Row 1: SLA & OLA percentages (live) + range picker -->
+    <div class="flex items-center justify-between gap-3">
       <h1 class="text-lg font-semibold text-slate-200">SLA/OLA</h1>
-      <span class="text-xs text-slate-500">Live · refreshes every 15s</span>
+      <RangePicker v-model="range" @update:model-value="load" />
     </div>
     <div class="grid gap-4 md:grid-cols-2">
       <div class="panel">
@@ -161,7 +169,7 @@ onUnmounted(() => clearInterval(timer.value))
       </div>
     </div>
 
-    <!-- Row 3: CDP Uptime & Downtime (live, always renders) -->
+    <!-- CDP Uptime cards + history state-map -->
     <section>
       <h2 class="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-400">CDP Uptime</h2>
       <div class="grid gap-4 md:grid-cols-2">
@@ -186,22 +194,19 @@ onUnmounted(() => clearInterval(timer.value))
             </div>
             <div class="rounded bg-runway-dark px-2 py-1">
               <div class="text-slate-500">Last seen</div>
-              <div class="font-semibold text-slate-200">{{ formatDateTime(c.last_seen || c.last_check) }}<span v-if="tzTick >= 0" class="hidden" /></div>
+              <div class="font-semibold text-slate-200">{{ formatDateTime(c.last_seen || c.last_check) }}</div>
             </div>
           </div>
         </div>
         <div v-if="!cdps.length" class="panel text-center text-sm text-slate-500">No CDP nodes configured</div>
       </div>
 
-      <!-- CDP uptime history (state-map) -->
       <div v-if="cdps.length" class="mt-4">
-        <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Uptime History (24h)</h3>
+        <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Uptime History ({{ range.key }})
+        </h3>
         <div class="grid gap-4 md:grid-cols-2">
-          <div
-            v-for="c in cdps"
-            :key="'map-' + (c.cdp_id ?? c.id)"
-            class="panel"
-          >
+          <div v-for="c in cdps" :key="'map-' + (c.cdp_id ?? c.id)" class="panel">
             <div class="mb-1 flex items-center justify-between">
               <span class="font-mono text-xs font-semibold text-slate-200">{{ c.name }}</span>
               <span class="text-xs text-slate-400">{{ c.ip_address || c.ip }}</span>
@@ -219,7 +224,7 @@ onUnmounted(() => clearInterval(timer.value))
       </div>
     </section>
 
-    <!-- Row 4: Sites (Data Availability, live sensor health) -->
+    <!-- Sites (Data Availability, live sensor health) -->
     <section>
       <h2 class="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-400">Sites — Data Availability</h2>
       <div class="grid gap-4 md:grid-cols-3">
@@ -241,8 +246,8 @@ onUnmounted(() => clearInterval(timer.value))
       </div>
     </section>
 
-    <!-- History graph (non-blocking; empty when no backfill yet) -->
-    <section class="panel" v-if="history.length">
+    <!-- SLA/OLA history BAR chart (always renders at the selected window) -->
+    <section class="panel">
       <div class="mb-2 flex items-center justify-between">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">SLA / OLA History</h2>
         <div class="flex gap-2">

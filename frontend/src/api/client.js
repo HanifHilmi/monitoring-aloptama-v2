@@ -19,17 +19,27 @@ export const api = {
     request(`/status/cdp/${cdpId}/connectivity?hours=${hours}`),
 
   // Telemetry
-  getTelemetry: (siteSlug, sensorCode, range = '24h', downsample = 1000, metric) => {
+  getTelemetry: (siteSlug, sensorCode, range = '24h', downsample = 1000, metric, win = null) => {
     const q = new URLSearchParams({ range, downsample })
+    if (win?.start) q.set('start', win.start)
+    if (win?.end) q.set('end', win.end)
     if (metric) q.set('metric', metric)
     return request(`/telemetry/${siteSlug}/${sensorCode}?${q.toString()}`)
   },
 
   // SLA / OLA (corrected semantics)
-  getAvailability: (range = 'month') =>
-    request(`/sla-ola/summary?range=${range}`),
-  getAvailabilityHistory: (bucket = 'daily', span = 'month') =>
-    request(`/sla-ola/history?bucket=${bucket}&span=${span}`),
+  getAvailability: (range = 'month', win = null) => {
+    const q = new URLSearchParams({ range })
+    if (win?.start) q.set('start', win.start)
+    if (win?.end) q.set('end', win.end)
+    return request(`/sla-ola/summary?${q.toString()}`)
+  },
+  getAvailabilityHistory: (bucket = 'daily', span = 'month', win = null) => {
+    const q = new URLSearchParams({ bucket, span })
+    if (win?.start) q.set('start', win.start)
+    if (win?.end) q.set('end', win.end)
+    return request(`/sla-ola/history?${q.toString()}`)
+  },
   // Legacy alias kept for SlaOlaView until migrated
   getSlaOlaSummary: (range = '30d') =>
     request(`/sla-ola/summary?range=${range}`),

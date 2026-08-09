@@ -27,6 +27,10 @@ RANGE_OPTIONS = {
     "24h": timedelta(hours=24),
     "7d": timedelta(days=7),
     "30d": timedelta(days=30),
+    "today": "today",
+    "3d": timedelta(days=3),
+    "week": timedelta(days=7),
+    "month": timedelta(days=30),
 }
 
 
@@ -34,7 +38,9 @@ RANGE_OPTIONS = {
 async def get_sensor_telemetry(
     site_slug: str,
     sensor_code: str,
-    range: str = Query("24h", pattern="^(1h|6h|24h|7d|30d)$"),
+    range: str = Query("today", pattern="^(1h|6h|24h|7d|30d|today|3d|week|month)$"),
+    start: str | None = Query(default=None, description="ISO-8601 UTC start (overrides range)"),
+    end: str | None = Query(default=None, description="ISO-8601 UTC end (overrides range)"),
     metric: str | None = Query(default=None),
     downsample: int = Query(
         default=None, ge=10, le=10000,
@@ -47,9 +53,28 @@ async def get_sensor_telemetry(
     When a numeric metric is selected, `series` is LTTB-downsampled. All
     rows (numeric + text) are returned in `samples` with `is_valid`.
     """
-    range_delta = RANGE_OPTIONS.get(range)
-    if range_delta is None:
-        raise HTTPException(status_code=422, detail="invalid range")
+    def _parse_dt(v):
+        if not v:
+            return None
+        if v.endswith("Z"):
+            v = v[:-1] + "+00:00"
+        try:
+            return datetime.fromisoformat(v).astimezone(timezone.utc)
+        except ValueError:
+            return None
+
+    s_dt = _parse_dt(start)
+    e_dt = _parse_dt(end)
+    if s_dt is None or e_dt is None:
+        delta = RANGE_OPTIONS.get(range)
+        if range == "today":
+            s_dt = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            e_dt = datetime.now(timezone.utc)
+        elif delta is None:
+            raise HTTPException(status_code=422, detail="invalid range")
+        else:
+            e_dt = datetime.now(timezone.utc)
+            s_dt = e_dt - delta
 
     site = (
         await db.execute(
@@ -65,10 +90,10 @@ async def get_sensor_telemetry(
     if not sensor.is_enabled:
         raise HTTPException(status_code=404, detail="sensor disabled")
 
-    since = datetime.now(timezone.utc) - range_delta
     stmt = select(Telemetry).where(
         Telemetry.sensor_id == sensor.id,
-        Telemetry.time >= since,
+        Telemetry.time >= s_dt,
+        Telemetry.time <= e_dt,
     )
     if metric:
         stmt = stmt.where(Telemetry.metric == metric)
@@ -119,6 +144,8 @@ async def get_sensor_telemetry(
             "station": sensor.station,
         },
         "range": range,
+        "start_date": s_dt,
+        "end_date": e_dt,
         "metric": selected,
         "metrics": metrics,
         "points": len(samples),

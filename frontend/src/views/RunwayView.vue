@@ -3,6 +3,7 @@ import { api } from '@/api/client'
 import { formatDateTime } from '@/utils/timezone'
 import { computed, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue'
 import SensorCard from '@/components/SensorCard.vue'
+import RangePicker from '@/components/RangePicker.vue'
 
 const props = defineProps({
   siteSlug: { type: String, required: true },
@@ -10,7 +11,7 @@ const props = defineProps({
 
 const overview = ref(null)
 const timer = ref(null)
-const range = ref('24h')  // unified time range for all sensor cards
+const range = ref({ key: '24h', start: new Date(Date.now() - 24*3600*1000).toISOString(), end: new Date().toISOString() })  // unified window
 const tzTick = ref(0)
 function onTzChange() { tzTick.value++ }
 onMounted(() => window.addEventListener('tzchange', onTzChange))
@@ -84,13 +85,8 @@ onUnmounted(() => clearInterval(timer.value))
       <section>
         <div class="mb-2 flex items-center justify-between">
           <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">Sensors</h2>
-          <select v-model="range" class="rounded border border-runway-border bg-runway-panel px-2 py-1 text-xs text-slate-200 focus:outline-none">
-            <option value="1h">Last 1 hour</option>
-            <option value="6h">Last 6 hours</option>
-            <option value="24h">Last 24 hours</option>
-            <option value="7d">Last 7 days</option>
-            <option value="30d">Last 30 days</option>
-          </select>
+          <RangePicker v-model="range" />
+          <span class="text-[10px] text-slate-500">← range for sensor graphs</span>
         </div>
         <div class="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
           <SensorCard
@@ -98,7 +94,8 @@ onUnmounted(() => clearInterval(timer.value))
             :key="sensor.id"
             :sensor="sensor"
             :site-slug="site.slug"
-            :range="range"
+            :range="range.key"
+            :win="range"
           />
         </div>
       </section>

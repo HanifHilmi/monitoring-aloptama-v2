@@ -8,6 +8,7 @@ const props = defineProps({
   sensor: { type: Object, required: true },
   siteSlug: { type: String, required: true },
   range: { type: String, default: '24h' },
+  win: { type: Object, default: null },  // { key, start, end } UTC
 })
 
 // Multi-metric data: { TSI: samples, RH: samples, ..., WGS: samples }
@@ -44,6 +45,10 @@ const chartOption = computed(() => {
     .map((s) => ({ time: s.time, value: s.value }))
   if (!pts.length) return null
 
+  const win = props.win || {}
+  const xMin = win.start || undefined
+  const xMax = win.end || undefined
+
   const isDual = props.sensor.code === 'ATRH' && metrics.value.RH?.length
   if (isDual) {
     const rh = metrics.value.RH
@@ -54,6 +59,8 @@ const chartOption = computed(() => {
       right: rh,
       leftName: 'TEMP °C',
       rightName: 'RH %',
+      xMin,
+      xMax,
     })
   }
   // ANEM: combine wind speed (kt, left) + wind direction (deg, right).
@@ -66,17 +73,21 @@ const chartOption = computed(() => {
       right: wd,
       leftName: 'WS kt',
       rightName: 'WD deg',
+      xMin,
+      xMax,
     })
   }
   if (props.sensor.code === 'CEL') {
     // dot graph: don't include zero values
     const dots = pts.filter((p) => p.value !== 0)
-    return buildDotOption({ points: dots, name: 'LR1 ft' })
+    return buildDotOption({ points: dots, name: 'LR1 ft', xMin, xMax })
   }
   return buildTimeSeriesOption({
     times: pts.map((p) => p.time),
     series: pts.map((p) => p.value),
     unit: props.sensor.unit || '',
+    xMin,
+    xMax,
   })
 })
 
@@ -95,10 +106,10 @@ async function load() {
   // flicker/disappear on every 30s refresh.
   const prev = metrics.value
   try {
-    const data = await api.getTelemetry(props.siteSlug, props.sensor.code, props.range, 1500)
+    const data = await api.getTelemetry(props.siteSlug, props.sensor.code, props.range, 1500, null, props.win)
     const all = await Promise.all(
       (data.metrics || []).map((m) =>
-        api.getTelemetry(props.siteSlug, props.sensor.code, props.range, 1500, m),
+        api.getTelemetry(props.siteSlug, props.sensor.code, props.range, 1500, m, props.win),
       ),
     )
     const next = {}
@@ -115,6 +126,7 @@ async function load() {
 }
 
 watch(() => props.range, load)
+watch(() => props.win, load, { deep: true })
 
 onMounted(() => {
   load()
