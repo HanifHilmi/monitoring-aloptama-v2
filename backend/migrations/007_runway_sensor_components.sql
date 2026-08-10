@@ -15,6 +15,11 @@
 --    on a component's combined chart (the frontend groups them).
 -- =====================================================================
 
+-- Schema: both columns MUST exist before any ORM SELECT runs (the app
+-- crashes at startup otherwise).
+ALTER TABLE sensors ADD COLUMN IF NOT EXISTS is_state BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE sensors ADD COLUMN IF NOT EXISTS chart_metrics TEXT;
+
 -- RWY04: separately-seeded ALS sensor folded into RVR -> disable it.
 UPDATE sensors SET is_enabled = FALSE, is_state = TRUE
 WHERE code = 'ALS'
@@ -25,8 +30,6 @@ UPDATE sensors SET is_state = TRUE
 WHERE code = 'DCP';
 
 -- Declarative combined-chart metric sets per sensor code.
-ALTER TABLE sensors ADD COLUMN IF NOT EXISTS chart_metrics TEXT;
-
 UPDATE sensors SET chart_metrics = 'TEMP,DEWP,RH'  WHERE code = 'ATRH';
 UPDATE sensors SET chart_metrics = 'QNH,DA'        WHERE code = 'BARO';
 UPDATE sensors SET chart_metrics = 'WS,WD'         WHERE code = 'ANEM';
