@@ -67,28 +67,33 @@ def parse_timestamp_from_filename(filename: str) -> Optional[datetime]:
 # Fixed character slices per (sensor_code, station). start:end are indexes
 # into the padded line. Event/text fields have scale=None (kept as text).
 _SLICES: dict[tuple[str, str], list[tuple[str, int, int, Optional[float]]]] = {
-    # RWY 04
-    ("ATRH", "04"): [("TEMP", 79, 83, 0.1), ("DEWP", 84, 88, 0.1), ("RH", 89, 93, None)],
-    ("BARO", "04"): [("QNH", 124, 129, 0.1)],
-    ("ANEM", "04"): [("WS", 19, 23, None), ("WD", 24, 28, None)],
-    ("RVR", "04"): [("RVR", 176, 181, None), ("VIS", 170, 175, None),
-                    ("ALS_INT", 160, 165, None), ("D/N", 166, 169, None)],
-    ("CEL", "04"): [("LR1", 218, 222, None), ("SKY", 228, 257, None)],
-    ("PWX", "04"): [("PW", 306, 315, None)],
+    # RWY 04  (offsets measured from the fixed-width WIDN 041 sample line)
+    ("ATRH", "04"): [("TEMP", 79, 84, 0.1), ("DEWP", 84, 89, 0.1), ("RH", 89, 93, None)],
+    ("BARO", "04"): [("QNH", 124, 130, 0.1), ("DA", 142, 148, None)],
+    ("ANEM", "04"): [("WS", 19, 24, None), ("WD", 24, 29, None),
+                        ("WGS", 29, 34, None), ("WGD", 34, 39, None)],
+    ("RVR", "04"): [("RVR", 176, 182, None), ("VIS", 170, 176, None),
+                       ("ALS", 160, 166, None), ("D/N", 166, 168, None),
+                       ("RLS", 182, 184, None)],
+    ("CEL", "04"): [("LR1", 218, 222, None), ("SKY", 228, 258, None)],
+    ("PWX", "04"): [("PW", 306, 312, None), ("RA", 288, 294, None)],
     # MIDDLE (station M)
-    ("ATRH", "M"): [("TEMP", 94, 98, 0.1), ("DEWP", 99, 103, 0.1), ("RH", 104, 108, None)],
-    ("BARO", "M"): [("QNH", 130, 135, 0.1)],
-    ("ANEM", "M"): [("WS", 39, 43, None), ("WD", 44, 48, None)],
-    ("RAIN", "M"): [("RA", 294, 299, None)],
+    ("ATRH", "M"): [("TEMP", 94, 99, 0.1), ("DEWP", 99, 104, 0.1), ("RH", 104, 108, None)],
+    ("BARO", "M"): [("QNH", 130, 136, 0.1), ("DA", 148, 154, None)],
+    ("ANEM", "M"): [("WS", 39, 44, None), ("WD", 44, 49, None),
+                       ("WGS", 49, 54, None), ("WGD", 54, 59, None)],
+    ("RAIN", "M"): [("RA", 294, 300, None)],
     ("SOLR", "M"): [("SOL", 326, 331, None)],
-    ("LIGH", "M"): [("LTX", 332, 336, None)],
+    ("LIGH", "M"): [("LTX", 332, 364, None)],
     # RWY 22
-    ("ATRH", "22"): [("TEMP", 109, 113, 0.1), ("DEWP", 114, 118, 0.1), ("RH", 119, 123, None)],
-    ("BARO", "22"): [("QNH", 136, 141, 0.1)],
-    ("ANEM", "22"): [("WS", 59, 63, None), ("WD", 64, 68, None)],
-    ("RVR", "22"): [("RVR", 200, 205, None), ("VIS", 194, 199, None)],
-    ("CEL", "22"): [("LR1", 223, 227, None), ("SKY", 258, 287, None)],
-    ("PWX", "22"): [("PW", 316, 325, None)],
+    ("ATRH", "22"): [("TEMP", 109, 114, 0.1), ("DEWP", 114, 119, 0.1), ("RH", 119, 123, None)],
+    ("BARO", "22"): [("QNH", 136, 142, 0.1), ("DA", 154, 160, None)],
+    ("ANEM", "22"): [("WS", 59, 64, None), ("WD", 64, 69, None),
+                        ("WGS", 69, 74, None), ("WGD", 74, 79, None)],
+    ("RVR", "22"): [("RVR", 200, 206, None), ("VIS", 194, 200, None),
+                       ("RLS", 206, 208, None)],
+    ("CEL", "22"): [("LR1", 223, 227, None), ("SKY", 258, 288, None)],
+    ("PWX", "22"): [("PW", 316, 322, None), ("RA", 300, 306, None)],
 }
 
 

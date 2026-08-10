@@ -35,19 +35,22 @@ def test_parse_widn_metrics(widn_file: Path) -> None:
     assert by_code[("BARO", "QNH")].value == 1010.8
     assert by_code[("ANEM", "WS")].value == 5.0
     assert by_code[("ANEM", "WD")].value == 165.0
-    # WGS (wind gust) is not persisted as a chart metric — it feeds the
-    # wind-gust rectangle panel instead.
-    assert ("ANEM", "WGS") not in by_code
+    # Wind gust metrics are now saved against the anemometer.
+    assert by_code[("ANEM", "WGS")].value == 9.0
+    assert by_code[("ANEM", "WGD")].value == 170.0
     assert by_code[("CEL", "LR1")].value == 23.0
     assert by_code[("CEL", "SKY")].text_value == "OVC024"
     # ALS + D/N belong to the RVR component (RVR_ALS), not a separate ALS.
-    assert by_code[("RVR", "ALS_INT")].value == 1047.0
+    assert by_code[("RVR", "ALS")].value == 1047.0
     assert by_code[("RVR", "D/N")].text_value == "D"
     # VIS belongs to RVR, not PWX (product semantics).
     assert by_code[("RVR", "VIS")].value == 13459.0
     assert by_code[("RVR", "RVR")].value == 13459.0
     assert ("PWX", "VIS") not in by_code
     assert by_code[("PWX", "PW")].text_value == "RERA"
+    # DA (density altitude) and RA (precip) are now parsed too.
+    assert by_code[("BARO", "DA")].value == 4.0
+    assert by_code[("PWX", "RA")].value == 0.0
 
 
 def test_parse_widn_station22(widn_file: Path) -> None:
