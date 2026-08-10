@@ -15,8 +15,7 @@ let observer = null
 
 function currentOption() {
   // ECharts 5.5 root `timezone`: renders every time axis in a fixed zone
-  // (UTC by default, Asia/Jakarta when the WIB toggle is on) — the
-  // visitor's device timezone is never used.
+  // UTC-only (no timezone toggle) — renders all time axes in UTC.
   return { timezone: chartTimezone(), ...props.option }
 }
 
@@ -25,12 +24,6 @@ function render() {
   // notMerge:false -> merge new data in-place so the graph just appends
   // the new points instead of replacing the chart (no card blink/fade).
   chart.setOption(currentOption(), { notMerge: false })
-}
-
-function onTzChange() {
-  if (!chart) return
-  chart.clear()
-  chart.setOption(currentOption(), { notMerge: true })
 }
 
 function resize() {
@@ -49,10 +42,8 @@ onMounted(() => {
 })
 
 watch(() => props.option, render, { deep: true })
-window.addEventListener('tzchange', onTzChange)
 
 onBeforeUnmount(() => {
-  window.removeEventListener('tzchange', onTzChange)
   observer?.disconnect()
   window.removeEventListener('resize', resize)
   chart?.dispose()

@@ -1,42 +1,31 @@
-// Shared UTC/WIB state. Device timezone is NEVER used.
-const state = { tz: 'UTC' }
-
-export function setTz(tz) {
-  state.tz = tz
-  window.dispatchEvent(new Event('tzchange'))
-}
-
-export const getTz = () => state.tz
-
-// ECharts 5.5 root `timezone` for time axes.
-export const chartTimezone = () => (state.tz === 'WIB' ? 'Asia/Jakarta' : 'UTC')
+// UTC-only time handling. The app NEVER uses the visitor's device timezone
+// and there is no WIB/UTC toggle — everything renders in UTC.
 
 const pad = (n) => String(n).padStart(2, '0')
 
-// Display an ISO timestamp in UTC (default) or WIB (+7h), independent of
-// the visitor's device timezone.
+// ECharts 5.5 root `timezone` for time axes (always UTC).
+export const chartTimezone = () => 'UTC'
+
+// Display an ISO timestamp in UTC (device-timezone independent).
 export function formatDateTime(iso) {
   if (!iso) return '—'
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return '—'
-  const t = new Date(d.getTime() + (state.tz === 'WIB' ? 7 * 3600 * 1000 : 0))
   return (
-    `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())} ` +
-    `${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())}:${pad(t.getUTCSeconds())} ${state.tz}`
+    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ` +
+    `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`
   )
 }
 
-// Short "HH:MM:SS UTC/WIB" formatter for chart tooltips (ECharts
-// axisPointer/axisLabel formatters receive a timestamp string/number).
+// Tooltip formatter for charts (accepts ISO string or epoch number).
 export function tooltipTime(iso) {
   if (!iso) return '—'
   let ts = iso
   if (typeof iso === 'number') ts = new Date(iso).toISOString()
   const d = new Date(ts)
   if (Number.isNaN(d.getTime())) return '—'
-  const t = new Date(d.getTime() + (state.tz === 'WIB' ? 7 * 3600 * 1000 : 0))
   return (
-    `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())} ` +
-    `${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())}:${pad(t.getUTCSeconds())} ${state.tz}`
+    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ` +
+    `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`
   )
 }

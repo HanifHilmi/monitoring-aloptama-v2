@@ -2,23 +2,12 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { RouterLink, RouterView } from 'vue-router'
 import { api } from '@/api/client'
-import { setTz } from '@/utils/timezone'
-
 const nav = [
   { to: '/', label: 'Dashboard', exact: true },
   { to: '/runway/04', label: 'Runway 04' },
   { to: '/runway/22', label: 'Runway 22' },
   { to: '/runway/middle', label: 'Runway Middle' },
 ]
-
-// ---- UTC / WIB toggle ----
-const tz = ref('UTC')
-const TZ_LABELS = { UTC: 'UTC', WIB: 'WIB (UTC+7)' }
-
-function toggleTz(v) {
-  tz.value = v
-  setTz(v)  // updates shared timezone state + dispatches tzchange
-}
 
 // ---- System health (green dot expands) ----
 const health = ref(null)
@@ -79,13 +68,6 @@ onUnmounted(() => clearInterval(healthTimer))
           </RouterLink>
         </nav>
         <div class="relative flex items-center gap-2">
-          <!-- Timezone toggle -->
-          <button
-            class="rounded-md border border-runway-border px-2 py-1 text-xs text-slate-300 hover:bg-runway-panel"
-            @click="toggleTz(tz === 'UTC' ? 'WIB' : 'UTC')"
-          >
-            {{ TZ_LABELS[tz] }}
-          </button>
           <!-- Green status dot expands on hover to show system health -->
           <span
             class="inline-block h-2.5 w-2.5 rounded-full cursor-pointer"

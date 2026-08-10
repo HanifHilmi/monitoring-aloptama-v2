@@ -22,11 +22,6 @@ const history = ref([])
 const timer = ref(null)
 const fastTimer = ref(null)
 const error = ref(null)
-const tzTick = ref(0)
-function onTzChange() { tzTick.value++ }
-onMounted(() => window.addEventListener('tzchange', onTzChange))
-onBeforeUnmount(() => window.removeEventListener('tzchange', onTzChange))
-
 // ---- Live SLA/OLA (only when the historical summary is unavailable) ----
 const liveSla = computed(() => {
   const nodes = live.value?.cdp_nodes || []

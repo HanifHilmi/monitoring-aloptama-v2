@@ -12,11 +12,6 @@ const props = defineProps({
 const overview = ref(null)
 const timer = ref(null)
 const range = ref({ key: '24h', start: new Date(Date.now() - 24*3600*1000).toISOString(), end: new Date().toISOString() })  // unified window
-const tzTick = ref(0)
-function onTzChange() { tzTick.value++ }
-onMounted(() => window.addEventListener('tzchange', onTzChange))
-onBeforeUnmount(() => window.removeEventListener('tzchange', onTzChange))
-
 const site = computed(() =>
   (overview.value?.sites || []).find((s) => s.slug === props.siteSlug),
 )
@@ -70,7 +65,7 @@ onUnmounted(() => clearInterval(timer.value))
         <div class="panel">
           <div class="text-xs text-slate-500">Last sample</div>
           <div class="mt-1 text-2xl font-semibold text-sky-400">
-            {{ formatDateTime(lastSampleIso) }}<span v-if="tzTick >= 0" class="hidden" />
+            {{ formatDateTime(lastSampleIso) }}
           </div>
         </div>
         <div class="panel">
