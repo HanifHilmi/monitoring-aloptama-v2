@@ -19,6 +19,10 @@ export const api = {
     request(`/status/cdp/${cdpId}/connectivity?hours=${hours}`),
 
   // Telemetry
+  getSiteAvailability: (siteSlug, win) => {
+    const q = new URLSearchParams({ start: win.start, end: win.end })
+    return request(`/telemetry/${siteSlug}/availability?${q.toString()}`)
+  },
   getTelemetry: (siteSlug, sensorCode, range = '24h', downsample = 1000, metric, win = null) => {
     const q = new URLSearchParams({ range, downsample })
     if (win?.start) q.set('start', win.start)

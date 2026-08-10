@@ -154,3 +154,36 @@ async def get_sensor_telemetry(
         "samples": samples,  # frontend SensorCard contract
         "downsample_enabled": len(pairs) > threshold,
     }
+
+
+@router.get("/{site_slug}/availability")
+async def site_component_availability(
+    site_slug: str,
+    start: str,
+    end: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Per-day count of enabled COMPONENTS (sensors) that have telemetry
+    rows in the window. Drives the DCP state graph: DCP is ONLINE on a day
+    when at least one other component delivered data."""
+    site = (await db.execute(select(Site).where(Site.slug == site_slug))).scalars().first()
+    if site is None:
+        raise HTTPException(status_code=404, detail="site not found")
+    sensors = (await db.execute(
+        select(Sensor).where(Sensor.site_id == site.id, Sensor.is_enabled.is_(True), Sensor.is_state.is_(False))
+    )).scalars().all()
+    s_dt = datetime.fromisoformat(start.replace('Z', '+00:00')).astimezone(timezone.utc)
+    e_dt = datetime.fromisoformat(end.replace('Z', '+00:00')).astimezone(timezone.utc)
+    rows = (await db.execute(
+        text("SELECT DISTINCT date_trunc('day', time)::date AS d, sensor_id FROM telemetry WHERE sensor_id = ANY(:ids) AND time >= :s AND time < :e"),
+        {"ids": [x.id for x in sensors], "s": s_dt, "e": e_dt}
+    )).all()
+    per_day = {}
+    for d, _sid in rows:
+        per_day[d.isoformat()] = per_day.get(d.isoformat(), 0) + 1
+    out = []
+    day = s_dt.date()
+    while day <= min(e_dt.date(), datetime.now(timezone.utc).date()):
+        out.append({"day": day.isoformat(), "components_with_data": per_day.get(day.isoformat(), 0), "total_components": len(sensors)})
+        day += timedelta(days=1)
+    return {"site": site_slug, "days": out}
