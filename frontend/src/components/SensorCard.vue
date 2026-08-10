@@ -1,6 +1,6 @@
 <script setup>
 import { api } from '@/api/client'
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import EChart from '@/components/EChart.vue'
 import { buildDualAxisOption } from '@/utils/chart'
 
@@ -14,6 +14,7 @@ const props = defineProps({
 const metrics = ref({})   // metric -> points[]
 const loading = ref(false)
 const error = ref(null)
+let pollTimer = null
 
 const chartMetrics = computed(() => {
   const list = (props.sensor.chart_metrics || '').split(',').map((m) => m.trim()).filter(Boolean)
@@ -147,6 +148,12 @@ const gustStats = computed(() => {
 
 watch(() => [props.range, props.sensor.id, props.win?.start, props.win?.end], load, { deep: true })
 load()  // ALWAYS load — never skip data fetching for any component
+
+// Auto-refresh every 60s so the graph advances with the 1-minute /oneminute
+// cadence. load() no longer clears metrics, so the chart stays mounted and
+// updates in place (no flicker).
+pollTimer = setInterval(load, 60_000)
+onBeforeUnmount(() => clearInterval(pollTimer))
 </script>
 
 <template>

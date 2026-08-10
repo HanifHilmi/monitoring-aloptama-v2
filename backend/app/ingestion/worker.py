@@ -152,44 +152,18 @@ class IngestionWorker:
 
     async def _ingest_latest(self, session: AsyncSession) -> None:
         now = datetime.now(timezone.utc)
-        # Backfill the last N full minutes (idempotent upsert -> no gaps, no
-        # duplicates): if a worker cycle was delayed/restarted, every missed
-        # minute gets persisted once, keeping the 1-minute /oneminute cadence.
-        backfill_window = 10
+        # LIVE-ONLY ingestion: one data point per minute, read from the
+        # CURRENT /oneminute file at now-1min. No replay, no backfill.
+        minute_ts = (now - timedelta(minutes=1)).replace(second=0, microsecond=0)
         sites = (await session.execute(select(Site))).scalars().all()
         sensors_q = await session.execute(select(Sensor))
         sensors = sensors_q.scalars().all()
-        for m in range(1, backfill_window + 1):
-            minute_ts = (now - timedelta(minutes=m)).replace(second=0, microsecond=0)
-            for site in sites:
-                site_sensors = [s for s in sensors if s.site_id == site.id]
-                if not site_sensors:
-                    continue
-                await self._ingest_site_minute(session, site, site_sensors, minute_ts)
+        for site in sites:
+            site_sensors = [s for s in sensors if s.site_id == site.id]
+            if not site_sensors:
+                continue
+            await self._ingest_site_minute(session, site, site_sensors, minute_ts)
         await session.commit()
-
-    def _resolve_oneminute(self, site: Site, ts: datetime):
-        """Resolve the oneminute file for a minute; when the target-day
-        file is missing (e.g. mount only has older snapshots), fall back to
-        the NEWEST existing oneminute file in the directory so data stored
-        in /oneminute/ is always mirrored into the DB."""
-        for prefix in site.file_prefixes or []:
-            p = self.reader.resolve_site_file(prefix, ts)
-            if p and p.exists():
-                return p
-        # Fallback: newest file in <mount>/oneminute/
-        active = self.reader.active_node()
-        if active is None:
-            return None
-        d = Path(active.mount_path) / "oneminute"
-        try:
-            if d.is_dir():
-                files = [p for p in d.glob('*OneMinute*.dat') if p.is_file()]
-                if files:
-                    return max(files, key=lambda p: p.stat().st_mtime)
-        except OSError:
-            pass
-        return None
 
     async def _ingest_site_minute(
         self,
@@ -214,8 +188,13 @@ class IngestionWorker:
             specs[s.code] = entry
             sensor_nodes[s.code] = s
 
-        # Resolve oneminute file (target day first, newest-file fallback).
-        one_min_path = self._resolve_oneminute(site, ts)
+        # Resolve the TARGET-DAY oneminute file only (live, no backfill).
+        one_min_path = None
+        for prefix in site.file_prefixes or []:
+            p = self.reader.resolve_site_file(prefix, ts)
+            if p and p.exists():
+                one_min_path = p
+                break
         if one_min_path is None:
             logger.debug("No oneminute file for site %s at %s", site.code, ts)
             return
