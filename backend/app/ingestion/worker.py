@@ -168,6 +168,29 @@ class IngestionWorker:
                 await self._ingest_site_minute(session, site, site_sensors, minute_ts)
         await session.commit()
 
+    def _resolve_oneminute(self, site: Site, ts: datetime):
+        """Resolve the oneminute file for a minute; when the target-day
+        file is missing (e.g. mount only has older snapshots), fall back to
+        the NEWEST existing oneminute file in the directory so data stored
+        in /oneminute/ is always mirrored into the DB."""
+        for prefix in site.file_prefixes or []:
+            p = self.reader.resolve_site_file(prefix, ts)
+            if p and p.exists():
+                return p
+        # Fallback: newest file in <mount>/oneminute/
+        active = self.reader.active_node()
+        if active is None:
+            return None
+        d = Path(active.mount_path) / "oneminute"
+        try:
+            if d.is_dir():
+                files = [p for p in d.glob('*OneMinute*.dat') if p.is_file()]
+                if files:
+                    return max(files, key=lambda p: p.stat().st_mtime)
+        except OSError:
+            pass
+        return None
+
     async def _ingest_site_minute(
         self,
         session: AsyncSession,
@@ -191,12 +214,15 @@ class IngestionWorker:
             specs[s.code] = entry
             sensor_nodes[s.code] = s
 
-        # Try each file prefix for the site until one parses
+        # Resolve oneminute file (target day first, newest-file fallback).
+        one_min_path = self._resolve_oneminute(site, ts)
+        raw_path = None
+        if one_min_path is None:
+            return
         for prefix in site.file_prefixes or []:
-            one_min_path = self.reader.resolve_site_file(prefix, ts)
             raw_path = self.reader.resolve_raw_sensor_file(prefix, ts)
-            if one_min_path is None or raw_path is None:
-                continue
+            if raw_path is not None:
+                break
 
             default_ts = parse_timestamp_from_filename(one_min_path.name) or ts
             parsed = parse_site_batch(one_min_path, raw_path, specs, default_ts)
