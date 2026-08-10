@@ -20,6 +20,7 @@ const slaOla = ref(null)        // /sla-ola/summary (historical) - SLA period
 const cdpOla = ref(null)        // /sla-ola/summary (historical) - CDP period
 const history = ref([])
 const timer = ref(null)
+const fastTimer = ref(null)
 const error = ref(null)
 const tzTick = ref(0)
 function onTzChange() { tzTick.value++ }
@@ -129,11 +130,29 @@ async function loadAll() {
   await loadSummary()
 }
 
+// Fast 10s poll: refreshes ONLY the SLA/OLA summary + CDP cards so the
+// numbers update live while a CDP backfill streams new rows (the 30s
+// loadAll blocks on the heavier history call).
+async function loadSummaryFast() {
+  try {
+    const [lv, so] = await Promise.all([
+      api.getStatusOverview(),
+      api.getAvailability('custom', slaPeriod.value).catch(() => null),
+    ])
+    live.value = lv
+    slaOla.value = so
+  } catch {}
+}
+
 onMounted(() => {
   loadAll()
   timer.value = setInterval(loadAll, 30_000)
+  fastTimer.value = setInterval(loadSummaryFast, 10_000)
 })
-onUnmounted(() => clearInterval(timer.value))
+onUnmounted(() => {
+  clearInterval(timer.value)
+  clearInterval(fastTimer.value)
+})
 </script>
 
 <template>

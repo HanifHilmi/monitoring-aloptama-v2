@@ -65,10 +65,12 @@ export function currentPeriod(category) {
     const w = quarterWindow(y, q)
     return { label: `Current Quarter (${w.label})`, ...w }
   }
-  // weekly: "Current Week" = last 7 days (per user note)
-  const start = new Date(now.getTime() - 6 * MS_DAY)
-  start.setUTCHours(0, 0, 0, 0)
-  return { key: 'weekly', label: 'Current Week (last 7d)', start: start.toISOString(), end: now.toISOString() }
+  // weekly: "Current Week" = SAME window as picking today in the picker:
+  // [today-6d 00:00 .. today 00:00 UTC) — otherwise the end-instant differs
+  // (now vs midnight) and yields a different denominator -> OLA mismatch
+  // despite identical displayed dates.
+  const w = weekWindow(y, m, now.getUTCDate())
+  return { key: 'weekly', label: 'Current Week (last 7d)', start: w.start, end: w.end }
 }
 
 export function daysInMonth(year, monthIdx) {
