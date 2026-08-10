@@ -81,6 +81,29 @@ export function daysInMonth(year, monthIdx) {
   return new Date(Date.UTC(year, monthIdx + 1, 0)).getUTCDate()
 }
 
+// 'So far' windows: start at the calendar period start, end at NOW.
+export function yearSoFar(y) {
+  return {
+    key: 'yearly', label: `Year ${y} (so far)`,
+    start: new Date(Date.UTC(y, 0, 1)).toISOString(),
+    end: new Date().toISOString(),
+  }
+}
+export function quarterSoFar(y, q) {
+  return {
+    key: 'quarterly', label: `${QUARTERS[q]} ${y} (so far)`,
+    start: new Date(Date.UTC(y, q * 3, 1)).toISOString(),
+    end: new Date().toISOString(),
+  }
+}
+export function monthSoFar(y, m) {
+  return {
+    key: 'monthly', label: `${MONTHS[m]} ${y} (so far)`,
+    start: new Date(Date.UTC(y, m, 1)).toISOString(),
+    end: new Date().toISOString(),
+  }
+}
+
 // Default window for a category when opened (current period).
 export function defaultPeriod(category) {
   return currentPeriod(category)
