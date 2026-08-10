@@ -41,7 +41,7 @@ async function load() {
       chartMetrics.value.map(async (m) => {
         try {
           const d = await api.getTelemetry(props.siteSlug, props.sensor.code, props.range, 1500, m, props.win)
-          return [m, d.points || d.samples || []]
+          return [m, d.series || d.points || d.samples || []]  // v2: series[]
         } catch {
           return [m, metrics.value[m] || []]  // keep last-known on error
         }
