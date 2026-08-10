@@ -14,7 +14,6 @@ const props = defineProps({
 const metrics = ref({})   // metric -> points[]
 const loading = ref(false)
 const error = ref(null)
-const availDays = ref([])  // DCP state graph: per-day components-with-data
 
 const chartMetrics = computed(() => {
   const list = (props.sensor.chart_metrics || '').split(',').map((m) => m.trim()).filter(Boolean)
@@ -31,32 +30,35 @@ const chartMetrics = computed(() => {
 })
 
 async function load() {
-  loading.value = true
+  // Keep the current chart on screen while refreshing: only show the
+  // spinner on the VERY FIRST load, and NEVER clear existing metrics so
+  // the graph stays mounted across refreshes.
+  const first = !hasData()
+  if (first) loading.value = true
   error.value = null
   try {
-    if (isState.value && props.win?.start) {
-      // DCP: fetch per-day 'components with data' -> real graph (always shows).
-      const d = await api.getSiteAvailability(props.siteSlug, props.win).catch(() => ({ days: [] }))
-      availDays.value = d.days || []
-      metrics.value = {}
-    } else {
-      const all = await Promise.all(
-        chartMetrics.value.map(async (m) => {
-          try {
-            const d = await api.getTelemetry(props.siteSlug, props.sensor.code, props.range, 1500, m, props.win)
-            return [m, d.points || d.samples || []]
-          } catch {
-            return [m, []]
-          }
-        }),
-      )
-      metrics.value = Object.fromEntries(all)
-    }
+    const all = await Promise.all(
+      chartMetrics.value.map(async (m) => {
+        try {
+          const d = await api.getTelemetry(props.siteSlug, props.sensor.code, props.range, 1500, m, props.win)
+          return [m, d.points || d.samples || []]
+        } catch {
+          return [m, metrics.value[m] || []]  // keep last-known on error
+        }
+      }),
+    )
+    const merged = {}
+    for (const [m, pts] of all) merged[m] = pts.length ? pts : (metrics.value[m] || [])
+    metrics.value = merged
   } catch (e) {
     error.value = e.message
   } finally {
     loading.value = false
   }
+}
+
+function hasData() {
+  return chartMetrics.value.some((m) => (metrics.value[m] || []).length > 0)
 }
 
 const isState = computed(() => props.sensor.is_state === true || props.sensor.code === 'DCP')
@@ -109,30 +111,6 @@ const chartOption = computed(() => {
 })
 
 // Wind gust stats for ANEM (WGS max + its direction in range).
-// DCP real graph: bar chart of components-with-data per day.
-const stateChartOption = computed(() => {
-  const win = props.win || {}
-  const xMin = win.start || undefined
-  const xMax = win.end || undefined
-  const days = availDays.value || []
-  const max = Math.max(1, ...days.map((d) => d.components_with_data))
-  return {
-    animation: true,
-    grid: { left: 12, right: 16, top: 24, bottom: 0, containLabel: true },
-    tooltip: { trigger: 'axis' },
-    xAxis: { type: 'time', min: xMin, max: xMax, axisLabel: { color: '#64748b', fontSize: 11 } },
-    yAxis: { type: 'value', min: 0, max, axisLabel: { color: '#64748b', fontSize: 11 }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.12)' } } },
-    series: [
-      {
-        name: 'Components with data',
-        type: 'bar',
-        data: days.map((d) => [d.day, d.components_with_data]),
-        itemStyle: { color: '#34d399', opacity: 0.8 },
-      },
-    ],
-  }
-})
-
 const gustStats = computed(() => {
   if (props.sensor.code !== 'ANEM') return null
   const wgs = metrics.value['WGS'] || []
@@ -190,9 +168,10 @@ load()  // ALWAYS load — never skip data fetching for any component
 
     <!-- Combined chart — ALWAYS rendered, no condition may hide it -->
     <div>
-      <div v-if="loading" class="py-10 text-center text-xs text-slate-500">Loading…</div>
-      <div v-else-if="error" class="py-10 text-center text-xs text-red-400">{{ error }}</div>
-      <EChart v-else-if="isState" :option="stateChartOption" height="220px" />
+      <!-- Loading only while there is NO data yet; once a chart exists it
+           stays on screen during refreshes (data merges in place). -->
+      <div v-if="loading && !hasData()" class="py-10 text-center text-xs text-slate-500">Loading…</div>
+      <div v-else-if="error && !hasData()" class="py-10 text-center text-xs text-red-400">{{ error }}</div>
       <EChart v-else-if="chartMetrics.length" :option="chartOption" height="220px" />
       <div v-else class="py-10 text-center text-xs text-slate-500">No chart configured</div>
     </div>
