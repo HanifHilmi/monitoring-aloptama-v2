@@ -152,17 +152,20 @@ class IngestionWorker:
 
     async def _ingest_latest(self, session: AsyncSession) -> None:
         now = datetime.now(timezone.utc)
-        # Process the previous full minute (files are written after minute close)
-        minute_ts = (now - timedelta(minutes=1)).replace(second=0, microsecond=0)
-
+        # Backfill the last N full minutes (idempotent upsert -> no gaps, no
+        # duplicates): if a worker cycle was delayed/restarted, every missed
+        # minute gets persisted once, keeping the 1-minute /oneminute cadence.
+        backfill_window = 10
         sites = (await session.execute(select(Site))).scalars().all()
         sensors_q = await session.execute(select(Sensor))
         sensors = sensors_q.scalars().all()
-        for site in sites:
-            site_sensors = [s for s in sensors if s.site_id == site.id]
-            if not site_sensors:
-                continue
-            await self._ingest_site_minute(session, site, site_sensors, minute_ts)
+        for m in range(1, backfill_window + 1):
+            minute_ts = (now - timedelta(minutes=m)).replace(second=0, microsecond=0)
+            for site in sites:
+                site_sensors = [s for s in sensors if s.site_id == site.id]
+                if not site_sensors:
+                    continue
+                await self._ingest_site_minute(session, site, site_sensors, minute_ts)
         await session.commit()
 
     async def _ingest_site_minute(
