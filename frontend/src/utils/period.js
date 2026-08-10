@@ -39,9 +39,13 @@ export function quarterWindow(year, qIdx) {
 }
 
 export function weekWindow(year, monthIdx, day) {
-  // Window ENDS at the clicked day: [day-6 .. day] (7 days).
-  const end = new Date(Date.UTC(year, monthIdx, day, 0, 0, 0, 0))
-  const start = new Date(end.getTime() - 6 * MS_DAY)
+  // 7-day window ENDING NOW: [day-6 00:00 .. now) so a fresh deploy counts
+  // today's live connectivity rows (an exclusive end at today-midnight
+  // excluded everything written today -> weekly showed 0.00% while monthly
+  // counted them -> 0.04%).
+  const endNow = new Date()
+  const start = new Date(Date.UTC(year, monthIdx, day, 0, 0, 0, 0) - 6 * MS_DAY)
+  const end = endNow
   const fmt = (d) => `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()].slice(0, 3)}`
   return {
     key: 'weekly',
@@ -55,20 +59,20 @@ export function currentPeriod(category) {
   const now = new Date()
   const y = now.getUTCFullYear()
   const m = now.getUTCMonth()
-  if (category === 'yearly') return { label: `Current Year (${y})`, ...yearWindow(y) }
+  if (category === 'yearly') {
+    const w = yearSoFar(y)
+    return { key: 'yearly', label: `${w.label}`, start: w.start, end: w.end }
+  }
   if (category === 'monthly') {
-    const w = monthWindow(y, m)
-    return { label: `Current Month (${w.label})`, ...w }
+    const w = monthSoFar(y, m)
+    return { key: 'monthly', label: `${w.label}`, start: w.start, end: w.end }
   }
   if (category === 'quarterly') {
     const q = Math.floor(m / 3)
-    const w = quarterWindow(y, q)
-    return { label: `Current Quarter (${w.label})`, ...w }
+    const w = quarterSoFar(y, q)
+    return { key: 'quarterly', label: `${w.label}`, start: w.start, end: w.end }
   }
-  // weekly: "Current Week" = SAME window as picking today in the picker:
-  // [today-6d 00:00 .. today 00:00 UTC) — otherwise the end-instant differs
-  // (now vs midnight) and yields a different denominator -> OLA mismatch
-  // despite identical displayed dates.
+  // weekly: same window as the week picker (ends at now).
   const w = weekWindow(y, m, now.getUTCDate())
   return { key: 'weekly', label: 'Current Week (last 7d)', start: w.start, end: w.end }
 }
