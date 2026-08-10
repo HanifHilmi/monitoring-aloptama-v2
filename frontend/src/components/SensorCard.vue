@@ -74,31 +74,54 @@ const dcpOnline = computed(() => {
     : chartMetrics.value.some((m) => (metrics.value[m] || []).length > 0)
 })
 
-const chartOption = computed(() => {
-  const code = props.sensor.code
-  const pts = {}
-  for (const m of chartMetrics.value) pts[m] = metrics.value[m] || []
+// Per-metric display metadata: axis side + unit.
+const METRIC_META = {
+  TEMP: { ax: 0, unit: '°C' }, DEWP: { ax: 0, unit: '°C' }, RH: { ax: 1, unit: '%' },
+  QNH: { ax: 0, unit: 'hPa' }, DA: { ax: 1, unit: 'ft' },
+  WS: { ax: 0, unit: 'kt' }, WD: { ax: 1, unit: 'deg' }, WGS: { ax: 1, unit: 'kt' },
+  RVR: { ax: 0, unit: 'm' }, VIS: { ax: 1, unit: 'm' }, ALS: { ax: 1, unit: 'cd' },
+  RA: { ax: 0, unit: 'mm' }, PW: { ax: 0, unit: '' }, LR1: { ax: 0, unit: '100ft' },
+  SKY: { ax: 1, unit: '' }, SOL: { ax: 0, unit: 'W/m2' }, LTX: { ax: 0, unit: '' },
+}
+const COLORS = ['#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#f472b6', '#fb7185']
 
+const chartOption = computed(() => {
   const win = props.win || {}
   const xMin = win.start || undefined
   const xMax = win.end || undefined
 
-  // Combined series option from a list of {metric, unit, color, yAxis?}
-  const colors = ['#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#f472b6', '#fb7185']
-  const series = []
-  const yAxis = [{ type: 'value', scale: true, name: 'value', axisLabel: { color: '#64748b', fontSize: 11 }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.12)' } } }, { type: 'value', scale: true, axisLabel: { color: '#64748b', fontSize: 11 }, splitLine: { show: false } }]
-  chartMetrics.value.forEach((m, i) => {
-    series.push({
-      name: m,
+  const axisNames = ['', '']
+  for (const m of chartMetrics.value) {
+    const meta = METRIC_META[m] || { ax: 0, unit: '' }
+    if (meta.ax >= 0 && !axisNames[meta.ax]) {
+      axisNames[meta.ax] = m === 'TEMP' ? '°C' : (m === 'DEWP' ? '°C' : (meta.unit || m))
+    }
+  }
+
+  const yAxis = [
+    { type: 'value', scale: true, name: axisNames[0] || 'value', axisLabel: { color: '#64748b', fontSize: 11 }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.12)' } } },
+    { type: 'value', scale: true, name: axisNames[1] || undefined, axisLabel: { color: '#64748b', fontSize: 11 }, splitLine: { show: false } },
+  ]
+
+  const series = chartMetrics.value.map((m, i) => {
+    const meta = METRIC_META[m] || { ax: 0, unit: '' }
+    const color = COLORS[i % COLORS.length]
+    // samples: [{time, value, is_valid}]
+    const data = (metrics.value[m] || [])
+      .filter((p) => p && typeof p.value === 'number')
+      .map((p) => [p.time, p.value])
+    return {
+      name: meta.unit ? `${m} (${meta.unit})` : m,
       type: 'line',
-      yAxisIndex: i >= 2 ? 1 : 0,
+      yAxisIndex: meta.ax,
       showSymbol: false,
-      data: (pts[m] || []).map((p) => [p.time, p.value]),
-      lineStyle: { width: 1.5, color: colors[i % colors.length] },
-      itemStyle: { color: colors[i % colors.length] },
+      data,
+      lineStyle: { width: 1.5, color },
+      itemStyle: { color },
       connectNulls: false,
-    })
+    }
   })
+
   return {
     animation: true,
     grid: { left: 12, right: 16, top: 24, bottom: 0, containLabel: true },
