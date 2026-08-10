@@ -2,6 +2,7 @@
 import { api } from '@/api/client'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import EChart from '@/components/EChart.vue'
+import { tooltipTime } from '@/utils/timezone'
 import { buildDualAxisOption } from '@/utils/chart'
 
 const props = defineProps({
@@ -128,7 +129,7 @@ const chartOption = computed(() => {
     grid: { left: 12, right: 16, top: 24, bottom: 0, containLabel: true },
     tooltip: { trigger: 'axis' },
     legend: { textStyle: { color: '#94a3b8' }, top: 0, type: 'scroll' },
-    xAxis: { type: 'time', min: xMin, max: xMax, axisLabel: { color: '#64748b', fontSize: 11 } },
+    xAxis: { type: 'time', min: xMin, max: xMax, axisLabel: { color: '#64748b', fontSize: 11, formatter: (v) => tooltipTime(v) } },
     yAxis,
     series,
   }

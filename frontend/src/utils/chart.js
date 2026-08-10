@@ -46,7 +46,7 @@ export function buildTimeSeriesOption({ times, series, unit = '', color = '#38bd
       min: xMin,
       max: xMax,
       axisLine: { lineStyle: { color: AXIS_COLOR } },
-      axisLabel: { color: AXIS_COLOR, fontSize: 11 },
+      axisLabel: { color: AXIS_COLOR, fontSize: 11, formatter: (v) => tooltipTime(v) },
       splitLine: { show: false },
     },
     yAxis: {
@@ -86,7 +86,7 @@ export function buildDualAxisOption({ left, right, leftName = '', rightName = ''
       min: xMin,
       max: xMax,
       axisLine: { lineStyle: { color: AXIS_COLOR } },
-      axisLabel: { color: AXIS_COLOR, fontSize: 11 },
+      axisLabel: { color: AXIS_COLOR, fontSize: 11, formatter: (v) => tooltipTime(v) },
       splitLine: { show: false },
     },
     yAxis: [
@@ -141,7 +141,7 @@ export function buildDotOption({ points, name = '', color = '#34d399', xMin = nu
       min: xMin,
       max: xMax,
       axisLine: { lineStyle: { color: AXIS_COLOR } },
-      axisLabel: { color: AXIS_COLOR, fontSize: 11 },
+      axisLabel: { color: AXIS_COLOR, fontSize: 11, formatter: (v) => tooltipTime(v) },
       splitLine: { show: false },
     },
     yAxis: {
