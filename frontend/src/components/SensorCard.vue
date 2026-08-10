@@ -53,9 +53,12 @@ async function load() {
 
 const isState = computed(() => props.sensor.is_state === true || props.sensor.code === 'DCP')
 
-// DCP: online if any chart metric delivered data in the window.
+// DCP: status comes from the backend /status/overview (online when at
+// least one other component on the site has fresh data). The overview may
+// be missing the flag pre-migration; fall back to 'any chart metric data'.
 const dcpOnline = computed(() => {
   if (!isState.value) return null
+  if (props.sensor.status) return props.sensor.status === 'ok'
   return chartMetrics.value.length === 0
     ? false
     : chartMetrics.value.some((m) => (metrics.value[m] || []).length > 0)

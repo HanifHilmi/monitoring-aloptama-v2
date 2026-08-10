@@ -30,8 +30,11 @@ async def get_status_overview(
         await db.execute(select(Site).options(selectinload(Site.sensors)))
     ).scalars().all()
 
+    # AWOS inherently lags wall-clock by ~1 minute; give 2 minutes of grace
+    # so healthy sensors don't flip to 'stale' because their latest row is
+    # one minute behind the system clock.
     stale_cutoff = datetime.now(timezone.utc) - timedelta(
-        minutes=settings.telemetry_stale_after_minutes
+        minutes=settings.telemetry_stale_after_minutes + 2
     )
 
     node_status = []
@@ -69,6 +72,21 @@ async def get_status_overview(
         sensors = []
         active_sensors = [s for s in site.sensors if s.is_enabled]
         for s in active_sensors:
+            if s.is_state:
+                # State components (DCP) carry no telemetry rows; their
+                # status is derived AFTER data sensors are measured below.
+                sensors.append({
+                    "id": s.id,
+                    "code": s.code,
+                    "name": s.name,
+                    "category": s.category,
+                    "unit": s.unit,
+                    "is_state": True,
+                    "chart_metrics": s.chart_metrics,
+                    "status": "stale",  # overwritten below
+                    "last_sample_time": None,
+                })
+                continue
             latest_ts = (
                 await db.execute(
                     select(func.max(Telemetry.time)).where(
@@ -84,10 +102,21 @@ async def get_status_overview(
                     "name": s.name,
                     "category": s.category,
                     "unit": s.unit,
+                    "is_state": False,
+                    "chart_metrics": s.chart_metrics,
                     "status": "ok" if fresh else "stale",
                     "last_sample_time": latest_ts,
                 }
             )
+        # DCP state: ONLINE when at least ONE other enabled component on
+        # this site has fresh (non-missing) data; OFFLINE only when every
+        # other component is stale.
+        any_component_ok = any(
+            x["status"] == "ok" and not x["is_state"] for x in sensors
+        )
+        for x in sensors:
+            if x["is_state"]:
+                x["status"] = "ok" if any_component_ok else "stale"
         site_status.append(
             {
                 "id": site.id,
