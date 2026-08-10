@@ -113,7 +113,7 @@ const gustStats = computed(() => {
 })
 
 watch(() => [props.range, props.sensor.id, props.win?.start, props.win?.end], load, { deep: true })
-if (props.sensor.code !== 'DCP' || !isState.value) load()
+load()  // ALWAYS load — never skip data fetching for any component
 </script>
 
 <template>
@@ -133,13 +133,11 @@ if (props.sensor.code !== 'DCP' || !isState.value) load()
       </span>
     </div>
 
-    <!-- DCP state card -->
-    <div v-if="isState" class="py-6 text-center">
-      <span v-if="dcpOnline" class="text-lg font-bold text-emerald-400">● ONLINE</span>
-      <span v-else class="text-lg font-bold text-red-400">● OFFLINE</span>
-      <div class="mt-1 text-xs text-slate-500">
-        Online when ≥1 component has data (not ////) in the selected range
-      </div>
+    <!-- State chip (DCP) — shown alongside, NEVER replaces the graph -->
+    <div v-if="isState" class="mb-2 flex items-center gap-2 text-xs">
+      <span v-if="dcpOnline" class="font-bold text-emerald-400">● ONLINE</span>
+      <span v-else class="font-bold text-red-400">● OFFLINE</span>
+      <span class="text-slate-500">Online when ≥1 component has data (not ////)</span>
     </div>
 
     <!-- Wind gust stats above ANEM graph -->
@@ -158,8 +156,8 @@ if (props.sensor.code !== 'DCP' || !isState.value) load()
       </div>
     </div>
 
-    <!-- Combined chart -->
-    <div v-if="!isState">
+    <!-- Combined chart — ALWAYS rendered, no condition may hide it -->
+    <div>
       <div v-if="loading" class="py-10 text-center text-xs text-slate-500">Loading…</div>
       <div v-else-if="error" class="py-10 text-center text-xs text-red-400">{{ error }}</div>
       <EChart v-else-if="chartMetrics.length" :option="chartOption" height="220px" />
