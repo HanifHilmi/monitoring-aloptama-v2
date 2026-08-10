@@ -216,26 +216,21 @@ class IngestionWorker:
 
         # Resolve oneminute file (target day first, newest-file fallback).
         one_min_path = self._resolve_oneminute(site, ts)
-        raw_path = None
         if one_min_path is None:
+            logger.debug("No oneminute file for site %s at %s", site.code, ts)
             return
-        for prefix in site.file_prefixes or []:
-            raw_path = self.reader.resolve_raw_sensor_file(prefix, ts)
-            if raw_path is not None:
-                break
 
-            default_ts = parse_timestamp_from_filename(one_min_path.name) or ts
-            parsed = parse_site_batch(one_min_path, raw_path, specs, default_ts)
-            if not parsed:
-                continue
-
-            # Persist telemetry + OLA transitions
-            await self._persist_site_samples(session, site, sensor_nodes, parsed, ts)
-            logger.debug(
-                "Site %s minute %s: %d sensors parsed", site.code, ts, len(parsed)
-            )
+        default_ts = parse_timestamp_from_filename(one_min_path.name) or ts
+        parsed = parse_site_batch(one_min_path, None, specs, default_ts)
+        if not parsed:
+            logger.debug("No parseable file for site %s at %s", site.code, ts)
             return
-        logger.debug("No parseable file for site %s at %s", site.code, ts)
+
+        # Persist telemetry + OLA transitions
+        await self._persist_site_samples(session, site, sensor_nodes, parsed, ts)
+        logger.debug(
+            "Site %s minute %s: %d sensors parsed", site.code, ts, len(parsed)
+        )
 
     async def _persist_site_samples(
         self,
