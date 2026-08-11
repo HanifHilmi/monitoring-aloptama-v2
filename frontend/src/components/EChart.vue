@@ -61,10 +61,14 @@ function applyUtc(option) {
     out.tooltip = t
   }
 
-  // Determine the true span (days) from the SERIES data timestamps, which
-  // reflect the real window regardless of whether xAxis.min/max is set.
-  let dataRangeDays = 0
-  let minD = null, maxD = null
+  // Determine the span (days) used to pick the axis label style.
+  // The AXIS min/max reflect the user's SELECTED window (e.g. '3 Days Ago'
+  // pins xAxis.min/max to 3 days), so they take priority. The series span
+  // is only a fallback for charts without axis bounds (auto range).
+  const axes = Array.isArray(out.xAxis) ? out.xAxis : out.xAxis ? [out.xAxis] : []
+
+  let seriesSpanDays = 0
+  let sMin = null, sMax = null
   const seriesList = Array.isArray(out.series) ? out.series : out.series ? [out.series] : []
   for (const s of seriesList) {
     const pts = Array.isArray(s.data) ? s.data : []
@@ -72,25 +76,25 @@ function applyUtc(option) {
       const t = Array.isArray(p) ? p[0] : (p && (p.time ?? p.value0))
       const d = toDate(t)
       if (!d) continue
-      if (minD === null || d < minD) minD = d
-      if (maxD === null || d > maxD) maxD = d
+      if (sMin === null || d < sMin) sMin = d
+      if (sMax === null || d > sMax) sMax = d
     }
   }
-  if (minD && maxD) {
-    dataRangeDays = (maxD - minD) / 86400000
-  }
-  // Fall back to the axis min/max if present and no series span was found.
-  const axes = Array.isArray(out.xAxis) ? out.xAxis : out.xAxis ? [out.xAxis] : []
+  if (sMin && sMax) seriesSpanDays = (sMax - sMin) / 86400000
+
   let changed = false
   const next = axes.map((ax) => {
     const a = { ...ax }
     if (a.type === 'time' && a.axisLabel && typeof a.axisLabel.formatter !== 'function') {
-      let rangeDays = dataRangeDays
-      if (rangeDays === 0) {
-        const minD = toDate(a.min)
-        const maxD = toDate(a.max)
-        rangeDays = minD && maxD ? (maxD - minD) / 86400000 : 0
+      const axMin = toDate(a.min)
+      const axMax = toDate(a.max)
+      // 1) selected axis window (user's pick) wins whenever it spans > 0.
+      let rangeDays = 0
+      if (axMin && axMax) {
+        rangeDays = (axMax - axMin) / 86400000
       }
+      // 2) fall back to series span (auto-range charts).
+      if (!(rangeDays > 0)) rangeDays = seriesSpanDays
       a.axisLabel = { ...a.axisLabel, formatter: (v) => utcAxisTick(v, rangeDays) }
       changed = true
     }
