@@ -5,16 +5,13 @@ import { createRouter, createWebHistory } from 'vue-router'
 export const SHOW_FUTURE = import.meta.env.VITE_SHOW_FUTURE === 'true'
 
 const routes = [
-  // NEW summary-of-all dashboard
-  { path: '/', name: 'home', component: () => import('@/views/HomeView.vue') },
+  // Dashboard is intentionally empty in this build phase: entering it
+  // auto-redirects to the AWOS CAT. III System page (old SLA/OLA dashboard).
+  { path: '/', redirect: '/cat3/system' },
 
-  // AWOS CAT. III (old SLA/OLA dashboard — kept as-is)
-  {
-    path: '/cat3',
-    name: 'cat3',
-    component: () => import('@/views/DashboardView.vue'),
-  },
-  { path: '/cat3/system', name: 'cat3-system', component: () => import('@/views/SystemView.vue') },
+  // AWOS CAT. III: 'System' hosts the old SLA/OLA dashboard.
+  { path: '/cat3', redirect: '/cat3/system' },
+  { path: '/cat3/system', name: 'cat3-system', component: () => import('@/views/DashboardView.vue') },
   { path: '/cat3/runway/04', name: 'cat3-runway-04', component: () => import('@/views/RunwayView.vue'), props: { siteSlug: '04' } },
   { path: '/cat3/runway/middle', name: 'cat3-runway-middle', component: () => import('@/views/RunwayView.vue'), props: { siteSlug: 'middle' } },
   { path: '/cat3/runway/22', name: 'cat3-runway-22', component: () => import('@/views/RunwayView.vue'), props: { siteSlug: '22' } },
