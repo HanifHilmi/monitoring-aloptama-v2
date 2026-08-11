@@ -1,13 +1,38 @@
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { RouterLink, RouterView } from 'vue-router'
 import { api } from '@/api/client'
-const nav = [
-  { to: '/', label: 'Dashboard', exact: true },
-  { to: '/runway/04', label: 'Runway 04' },
-  { to: '/runway/22', label: 'Runway 22' },
-  { to: '/runway/middle', label: 'Runway Middle' },
+import { i18n, LOCALES } from '@/i18n'
+
+// ---- Collapsible top bar navigation (routing plan) ----
+const navGroups = [
+  { to: '/', key: 'dashboard' },
+  {
+    key: 'cat3',
+    to: '/cat3',
+    children: [
+      { to: '/cat3/system', key: 'system' },
+      { to: '/cat3/runway/04', key: 'runway04' },
+      { to: '/cat3/runway/middle', key: 'runwayMiddle' },
+      { to: '/cat3/runway/22', key: 'runway22' },
+      { to: '/cat3/metar', key: 'metar' },
+    ],
+  },
 ]
+
+// ---- Localization (labels only; UTC never affected) ----
+const locale = ref('en')
+const t = computed(() => i18n(locale.value))
+function toggleLocale() {
+  const i = LOCALES.indexOf(locale.value)
+  locale.value = LOCALES[(i + 1) % LOCALES.length]
+}
+
+// Collapse state for the group menu.
+const openMenu = ref(null)
+function toggleMenu(key) {
+  openMenu.value = openMenu.value === key ? null : key
+}
 
 // ---- System health (green dot expands) ----
 const health = ref(null)
@@ -57,15 +82,46 @@ onUnmounted(() => clearInterval(healthTimer))
         </RouterLink>
         <nav class="flex flex-1 items-center gap-1">
           <RouterLink
-            v-for="item in nav"
-            :key="item.to"
-            :to="item.to"
+            to="/"
             class="rounded-md px-3 py-1.5 text-sm text-slate-300 transition-colors hover:bg-runway-panel hover:text-white"
             active-class="bg-runway-panel text-white"
-            :exact-active-class="item.exact ? 'bg-runway-panel text-white' : ''"
+            exact-active-class="bg-runway-panel text-white"
           >
-            {{ item.label }}
+            {{ t('dashboard') }}
           </RouterLink>
+          <div
+            v-for="g in navGroups.filter((x) => x.children)"
+            :key="g.key"
+            class="relative"
+          >
+            <button
+              class="rounded-md px-3 py-1.5 text-sm text-slate-300 transition-colors hover:bg-runway-panel hover:text-white"
+              @click="toggleMenu(g.key)"
+            >
+              {{ t(g.key) }} ▾
+            </button>
+            <div
+              v-if="openMenu === g.key"
+              class="absolute left-0 top-full z-30 mt-1 w-52 rounded-md border border-runway-border bg-runway-panel p-1 shadow-xl"
+            >
+              <RouterLink
+                v-for="c in g.children"
+                :key="c.to"
+                :to="c.to"
+                class="block rounded px-2 py-1.5 text-xs text-slate-300 transition-colors hover:bg-runway-dark hover:text-white"
+                active-class="bg-runway-dark text-white"
+              >
+                {{ t(c.key) }}
+              </RouterLink>
+            </div>
+          </div>
+          <button
+            class="rounded-md border border-runway-border px-2 py-1 text-xs text-slate-300 hover:bg-runway-panel"
+            :title="t('comingSoon')"
+            @click="toggleLocale"
+          >
+            {{ locale.toUpperCase() }}
+          </button>
         </nav>
         <div class="relative flex items-center gap-2">
           <!-- Green status dot expands on hover to show system health -->
