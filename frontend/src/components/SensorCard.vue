@@ -14,6 +14,7 @@ const props = defineProps({
 const metrics = ref({})   // metric -> points[]
 const loading = ref(false)
 const error = ref(null)
+const refreshTick = ref(0)
 let pollTimer = null
 
 const chartMetrics = computed(() => {
@@ -149,10 +150,14 @@ const gustStats = computed(() => {
 watch(() => [props.range, props.sensor.id, props.win?.start, props.win?.end], load, { deep: true })
 load()  // ALWAYS load — never skip data fetching for any component
 
-// Auto-refresh every 60s so the graph advances with the 1-minute /oneminute
-// cadence. load() no longer clears metrics, so the chart stays mounted and
-// updates in place (no flicker).
-pollTimer = setInterval(load, 60_000)
+// Auto-refresh every 15s so the graph advances with the 1-minute /oneminute
+// cadence. load() no longer clears metrics, and refreshTick++ forces EChart
+// to re-render even if the option identity is unchanged.
+async function poll() {
+  await load()
+  refreshTick.value++
+}
+pollTimer = setInterval(poll, 15_000)
 onBeforeUnmount(() => clearInterval(pollTimer))
 </script>
 
@@ -202,7 +207,7 @@ onBeforeUnmount(() => clearInterval(pollTimer))
            stays on screen during refreshes (data merges in place). -->
       <div v-if="loading && !hasData()" class="py-10 text-center text-xs text-slate-500">Loading…</div>
       <div v-else-if="error && !hasData()" class="py-10 text-center text-xs text-red-400">{{ error }}</div>
-      <EChart v-else-if="chartMetrics.length" :option="chartOption" height="220px" />
+      <EChart v-else-if="chartMetrics.length" :option="chartOption" :refresh-tick="refreshTick" height="220px" />
       <div v-else class="py-10 text-center text-xs text-slate-500">No chart configured</div>
     </div>
   </div>

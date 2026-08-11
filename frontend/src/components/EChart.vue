@@ -7,6 +7,7 @@ const props = defineProps({
   option: { type: Object, required: true },
   height: { type: String, default: '280px' },
   autoresize: { type: Boolean, default: true },
+  refreshTick: { type: Number, default: 0 },
 })
 
 const el = ref(null)
@@ -98,6 +99,9 @@ onMounted(() => {
 })
 
 watch(() => props.option, render, { deep: true })
+// Explicit refresh trigger: parents bump refreshTick to force a re-render
+// even when the option object identity is unchanged (guarantees live updates).
+watch(() => props.refreshTick, render)
 
 onBeforeUnmount(() => {
   observer?.disconnect()
