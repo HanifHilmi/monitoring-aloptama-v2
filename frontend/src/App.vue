@@ -30,8 +30,16 @@ function toggleLocale() {
 
 // Collapse state for the group menu.
 const openMenu = ref(null)
+const menuRoot = ref(null)
 function toggleMenu(key) {
   openMenu.value = openMenu.value === key ? null : key
+}
+
+// Close the dropdown when clicking anywhere outside the group wrappers.
+function onDocClick(ev) {
+  const roots = Array.isArray(menuRoot.value) ? menuRoot.value : menuRoot.value ? [menuRoot.value] : []
+  const inside = roots.some((r) => r && r.contains ? r.contains(ev.target) : false)
+  if (!inside) openMenu.value = null
 }
 
 // ---- System health (green dot expands) ----
@@ -68,8 +76,12 @@ async function runBackfill(kind) {
 onMounted(() => {
   loadHealth()
   healthTimer = setInterval(loadHealth, 15_000)
+  if (typeof document !== 'undefined') document.addEventListener('click', onDocClick)
 })
-onUnmounted(() => clearInterval(healthTimer))
+onUnmounted(() => {
+  clearInterval(healthTimer)
+  if (typeof document !== 'undefined') document.removeEventListener('click', onDocClick)
+})
 </script>
 
 <template>
@@ -92,6 +104,7 @@ onUnmounted(() => clearInterval(healthTimer))
           <div
             v-for="g in navGroups.filter((x) => x.children)"
             :key="g.key"
+            ref="menuRoot"
             class="relative"
           >
             <button
