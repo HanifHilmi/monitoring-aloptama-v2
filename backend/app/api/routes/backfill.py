@@ -251,3 +251,73 @@ async def backfill_dcp() -> StreamingResponse:
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+# ----------------------------------------------------------------------
+# Background backfill jobs (server-side, independent of the browser).
+# POST /backfill/{kind}/start returns a job_id immediately; the work runs
+# as an asyncio task in the backend process so a page refresh never stops
+# it.  GET /backfill/job/{job_id}/stream replays the log lines (SSE).
+# ----------------------------------------------------------------------
+import asyncio as _asyncio
+
+_JOBS: dict[str, dict] = {}   # job_id -> {kind, status, lines[]}
+_job_counter = 0
+
+
+async def _run_job(job_id: str, kind: str) -> None:
+    _JOBS[job_id]["status"] = "running"
+    gen = _stream_cdp() if kind == "cdp" else _stream_dcp()
+    try:
+        async for line in gen:
+            _JOBS[job_id]["lines"].append(line)
+        _JOBS[job_id]["status"] = "done"
+    except Exception as exc:  # noqa: BLE001
+        _JOBS[job_id]["lines"].append(f"ERROR: {exc}")
+        _JOBS[job_id]["status"] = "error"
+
+
+def _new_job(kind: str) -> str:
+    global _job_counter
+    _job_counter += 1
+    job_id = f"{kind}-{_job_counter}"
+    _JOBS[job_id] = {"kind": kind, "status": "pending", "lines": []}
+    _asyncio.get_running_loop().create_task(_run_job(job_id, kind))
+    return job_id
+
+
+@router.post("/{kind}/start", tags=["backfill"])
+async def start_backfill(kind: str) -> dict:
+    if kind not in ("cdp", "dcp"):
+        return {"ok": False, "error": "kind must be cdp or dcp"}
+    job_id = _new_job(kind)
+    return {"ok": True, "job_id": job_id}
+
+
+@router.get("/job/{job_id}", tags=["backfill"])
+async def backfill_job_status(job_id: str) -> dict:
+    job = _JOBS.get(job_id)
+    if job is None:
+        return {"ok": False, "error": "job not found"}
+    return {"job_id": job_id, "status": job["status"], "lines": job["lines"]}
+
+
+@router.get("/job/{job_id}/stream", tags=["backfill"])
+async def backfill_job_stream(job_id: str) -> StreamingResponse:
+    async def gen():
+        job = _JOBS.get(job_id)
+        if job is None:
+            yield _sse("ERROR job not found")
+            return
+        # Replay what has been captured so far, then tail new lines.
+        idx = 0
+        while True:
+            while idx < len(job["lines"]):
+                yield job["lines"][idx]
+                idx += 1
+            if job["status"] in ("done", "error"):
+                yield _sse(f"JOB {job['status'].upper()}")
+                return
+            await _asyncio.sleep(1)
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
