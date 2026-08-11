@@ -23,6 +23,14 @@ export const api = {
     const q = new URLSearchParams({ start: win.start, end: win.end })
     return request(`/telemetry/${siteSlug}/availability?${q.toString()}`)
   },
+  // Wide awos_metrics: fetch several metric columns in one call.
+  getWideTelemetry: (siteSlug, aliases = [], win = null, range = 'today') => {
+    const q = new URLSearchParams({ range })
+    if (aliases.length) q.set('metrics', aliases.join(','))
+    if (win?.start) q.set('start', win.start)
+    if (win?.end) q.set('end', win.end)
+    return request(`/telemetry/${siteSlug}?${q.toString()}`)
+  },
   getTelemetry: (siteSlug, sensorCode, range = '24h', downsample = 1000, metric, win = null) => {
     const q = new URLSearchParams({ range, downsample })
     if (win?.start) q.set('start', win.start)

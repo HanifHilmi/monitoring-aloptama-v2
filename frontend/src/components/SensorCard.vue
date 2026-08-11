@@ -21,6 +21,14 @@ let pollTimer = null
 // so new /oneminute rows (past the originally-pinned end) appear live.
 const liveWin = ref(props.win ? { ...props.win } : null)
 
+const WIDE_COL = {
+  TEMP: 'temp_c', DEWP: 'dewp_c', RH: 'rh_pct', QNH: 'qnh_hpa', DA: 'da_ft',
+  WS: 'wind_speed_kt', WD: 'wind_dir_deg', WGS: 'gust_speed_kt', WGD: 'gust_dir_deg',
+  RVR: 'rvr_m', VIS: 'vis_m', ALS: 'als_cd', 'D/N': 'rvr_dn',
+  LR1: 'lr1_100ft', SKY: 'sky_code', RA: 'precip_mm', PW: 'present_weather',
+  SOL: 'solar_wm2', LTX: 'lightning',
+}
+
 const chartMetrics = computed(() => {
   const list = (props.sensor.chart_metrics || '').split(',').map((m) => m.trim()).filter(Boolean)
   // Defaults per sensor code when chart_metrics not populated yet.
@@ -43,18 +51,39 @@ async function load() {
   if (first) loading.value = true
   error.value = null
   try {
-    const all = await Promise.all(
-      chartMetrics.value.map(async (m) => {
-        try {
-          const d = await api.getTelemetry(props.siteSlug, props.sensor.code, props.range, 1500, m, liveWin.value)
-          return [m, d.series || d.points || d.samples || []]  // v2: series[]
-        } catch {
-          return [m, metrics.value[m] || []]  // keep last-known on error
+    // Prefer the WIDE awos_metrics endpoint (one call, wide columns);
+    // fall back to per-metric EAV if it errors (e.g. table not migrated).
+    let merged = {}
+    try {
+      const aliases = chartMetrics.value
+      const wide = await api.getWideTelemetry(props.siteSlug, aliases, liveWin.value, props.range)
+      const cols = aliases.map((a) => WIDE_COL[a] || a)
+      merged = {}
+      for (const m of aliases) merged[m] = []
+      for (const r of wide.samples || []) {
+        for (let i = 0; i < aliases.length; i++) {
+          const v = r[cols[i]]
+          if (typeof v === 'number' && !Number.isNaN(v)) {
+            merged[aliases[i]].push({ time: r.time, value: v })
+          }
         }
-      }),
-    )
-    const merged = {}
-    for (const [m, pts] of all) merged[m] = pts.length ? pts : (metrics.value[m] || [])
+      }
+      // keep last-known for metrics that returned no new rows
+      for (const m of aliases) if (!merged[m].length && metrics.value[m]) merged[m] = metrics.value[m]
+    } catch {
+      const all = await Promise.all(
+        chartMetrics.value.map(async (m) => {
+          try {
+            const d = await api.getTelemetry(props.siteSlug, props.sensor.code, props.range, 1500, m, liveWin.value)
+            return [m, d.series || d.points || d.samples || []]
+          } catch {
+            return [m, metrics.value[m] || []]
+          }
+        }),
+      )
+      merged = {}
+      for (const [m, pts] of all) merged[m] = pts.length ? pts : (metrics.value[m] || [])
+    }
     metrics.value = merged
   } catch (e) {
     error.value = e.message
