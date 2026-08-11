@@ -152,9 +152,11 @@ class IngestionWorker:
 
     async def _ingest_latest(self, session: AsyncSession) -> None:
         now = datetime.now(timezone.utc)
-        # LIVE-ONLY ingestion: one data point per minute, read from the
-        # CURRENT /oneminute file at now-1min. No replay, no backfill.
-        minute_ts = (now - timedelta(minutes=1)).replace(second=0, microsecond=0)
+        # LIVE-ONLY ingestion, resilient to file lag: the oneminute file may
+        # be a few minutes behind the wall clock. Instead of strictly
+        # now-1min (which writes nothing until the file catches up), ingest
+        # the LATEST minute actually present in the current-day file, falling
+        # back to now-1min. No replay of old days (no backfill).
         sites = (await session.execute(select(Site))).scalars().all()
         sensors_q = await session.execute(select(Sensor))
         sensors = sensors_q.scalars().all()
@@ -162,8 +164,27 @@ class IngestionWorker:
             site_sensors = [s for s in sensors if s.site_id == site.id]
             if not site_sensors:
                 continue
+            minute_ts = self._latest_file_minute(site, now)
+            if minute_ts is None:
+                minute_ts = (now - timedelta(minutes=1)).replace(second=0, microsecond=0)
             await self._ingest_site_minute(session, site, site_sensors, minute_ts)
         await session.commit()
+
+    def _latest_file_minute(self, site: Site, now: datetime) -> Optional[datetime]:
+        """Return the newest minute present in the current-day oneminute file
+        (or None if the file is missing/unparseable). Keeps ingestion live-only
+        while tracking the file's actual content so the graph fills as the
+        file updates."""
+        for prefix in site.file_prefixes or []:
+            p = self.reader.resolve_site_file(prefix, now)
+            if p and p.exists():
+                try:
+                    recs = parse_one_minute_file(p, {}, None)
+                    if recs:
+                        return max(r.ts for r in recs)
+                except Exception:
+                    return None
+        return None
 
     async def _ingest_site_minute(
         self,
