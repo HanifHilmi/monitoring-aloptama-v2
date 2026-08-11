@@ -105,8 +105,8 @@ const chartOption = computed(() => {
   }
 
   const yAxis = [
-    { type: 'value', scale: true, name: axisNames[0] || 'value', axisLabel: { color: '#64748b', fontSize: 11 }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.12)' } } },
-    { type: 'value', scale: true, name: axisNames[1] || undefined, axisLabel: { color: '#64748b', fontSize: 11 }, splitLine: { show: false } },
+    { type: 'value', scale: true, name: axisNames[0] || 'value', nameGap: 6, nameTextStyle: { color: '#94a3b8', fontSize: 10 }, axisLabel: { color: '#64748b', fontSize: 11 }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.12)' } } },
+    { type: 'value', scale: true, name: axisNames[1] || undefined, nameGap: 6, nameTextStyle: { color: '#94a3b8', fontSize: 10 }, axisLabel: { color: '#64748b', fontSize: 11 }, splitLine: { show: false } },
   ]
 
   const series = chartMetrics.value.map((m, i) => {
@@ -130,7 +130,7 @@ const chartOption = computed(() => {
 
   return {
     animation: true,
-    grid: { left: 12, right: 16, top: 24, bottom: 0, containLabel: true },
+    grid: { left: 48, right: 16, top: 24, bottom: 0, containLabel: true },
     tooltip: { trigger: 'axis' },
     legend: { textStyle: { color: '#94a3b8' }, top: 0, type: 'scroll' },
     xAxis: { type: 'time', min: xMin, max: xMax, axisLabel: { color: '#64748b', fontSize: 11 } },
