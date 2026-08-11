@@ -29,6 +29,7 @@ from app.ingestion.state_machine import (
     transition_sla,
 )
 from app.models import (
+    AwosMetrics,
     CdpConnectivity,
     CdpNode,
     Sensor,
@@ -48,6 +49,7 @@ class IngestionWorker:
         self.sm = sm
         self._stop = asyncio.Event()
         self._tasks: list[asyncio.Task] = []
+        self._watermarks: dict[str, datetime] = {}
 
     # ------------------------------------------------------------------
     async def start(self) -> None:
@@ -150,11 +152,41 @@ class IngestionWorker:
                 logger.exception("Telemetry ingestion error")
             await asyncio.sleep(settings.ingestion_interval_seconds)
 
+    # Wide-row metric -> awos_metrics column mapping (value vs text).
+    _WIDE_COLUMNS = {
+        "TEMP": ("temp_c", False), "DEWP": ("dewp_c", False), "RH": ("rh_pct", False),
+        "QNH": ("qnh_hpa", False), "DA": ("da_ft", False),
+        "WS": ("wind_speed_kt", False), "WD": ("wind_dir_deg", False),
+        "WGS": ("gust_speed_kt", False), "WGD": ("gust_dir_deg", False),
+        "RVR": ("rvr_m", False), "VIS": ("vis_m", False), "ALS": ("als_cd", False),
+        "D/N": ("rvr_dn", True), "RLS": ("rls", False),
+        "LR1": ("lr1_100ft", False), "SKY": ("sky_code", True),
+        "RA": ("precip_mm", False), "PW": ("present_weather", True),
+        "SOL": ("solar_wm2", False), "LTX": ("lightning", True),
+    }
+
+    @staticmethod
+    def _group_wide(parsed_by_code: dict, site_id: str) -> list[dict]:
+        """Collapse EAV metrics into one wide row per (minute, site)."""
+        rows: dict = {}
+        for code, metrics in (parsed_by_code or {}).items():
+            for m in metrics or []:
+                if not m.is_valid or m.ts is None:
+                    continue
+                col = IngestionWorker._WIDE_COLUMNS.get(m.metric)
+                if not col:
+                    continue
+                column, is_text = col
+                key = m.ts.replace(second=0, microsecond=0)
+                row = rows.setdefault(key, {"time": key, "site_id": site_id})
+                try:
+                    row[column] = m.text_value if is_text else m.value
+                except Exception:
+                    row[column] = None
+        return list(rows.values())
+
     async def _ingest_latest(self, session: AsyncSession) -> None:
         now = datetime.now(timezone.utc)
-        # LIVE-ONLY ingestion: one data point per minute, read from the
-        # CURRENT /oneminute file at now-1min. No replay, no backfill.
-        minute_ts = (now - timedelta(minutes=1)).replace(second=0, microsecond=0)
         sites = (await session.execute(select(Site))).scalars().all()
         sensors_q = await session.execute(select(Sensor))
         sensors = sensors_q.scalars().all()
@@ -162,8 +194,97 @@ class IngestionWorker:
             site_sensors = [s for s in sensors if s.site_id == site.id]
             if not site_sensors:
                 continue
-            await self._ingest_site_minute(session, site, site_sensors, minute_ts)
+            # WATERMARK: only ingest minutes strictly after the stored MAX.
+            watermark = (
+                await session.execute(
+                    select(func.max(AwosMetrics.time)).where(
+                        AwosMetrics.site_id == site.slug
+                    )
+                )
+            ).scalar_one()
+            if watermark is None:
+                watermark = datetime.combine(now.date(), datetime.min.time(), tzinfo=timezone.utc)
+            self._watermarks[site.slug] = watermark
+            await self._ingest_site_watermark(session, site, site_sensors, watermark, now)
         await session.commit()
+
+    async def _ingest_site_watermark(
+        self,
+        session: AsyncSession,
+        site: Site,
+        sensors: list[Sensor],
+        watermark: datetime,
+        now: datetime,
+    ) -> None:
+        # Build unified sensor specs (WIDN symbol/station for column mapping).
+        specs: dict[str, dict] = {}
+        sensor_nodes: dict[str, Sensor] = {}
+        for s in sensors:
+            if not s.is_enabled:
+                continue
+            entry: dict = {"sensor_id": s.id}
+            if s.fallback_slice:
+                entry["fallback_slice"] = s.fallback_slice
+            if s.symbol:
+                entry["symbol"] = s.symbol
+            if s.station:
+                entry["station"] = s.station
+            specs[s.code] = entry
+            sensor_nodes[s.code] = s
+
+        # Resolve the TARGET-DAY oneminute file only (live; no old-day replay).
+        one_min_path = None
+        for prefix in site.file_prefixes or []:
+            p = self.reader.resolve_site_file(prefix, now)
+            if p and p.exists():
+                one_min_path = p
+                break
+        if one_min_path is None:
+            logger.debug("No oneminute file for site %s at %s", site.code, now)
+            return
+
+        default_ts = parse_timestamp_from_filename(one_min_path.name) or now
+        parsed = parse_site_batch(one_min_path, None, specs, default_ts)
+        if not parsed:
+            logger.debug("No parseable file for site %s at %s", site.code, now)
+            return
+
+        # WATERMARK: keep minutes strictly > the stored max (grabs delayed
+        # minutes naturally) and not in the future.
+        rows = [
+            r for r in self._group_wide(parsed, site.slug)
+            if r["time"] > watermark and r["time"] <= now
+        ]
+        if not rows:
+            return
+
+        await self._persist_site_samples(session, site, sensor_nodes, parsed, now)
+        await self._persist_site_wide(session, rows)
+        logger.debug(
+            "Site %s watermark %s -> uploaded %d wide minutes",
+            site.code, watermark.isoformat(), len(rows),
+        )
+
+    async def _persist_site_wide(self, session: AsyncSession, rows: list[dict]) -> None:
+        """Bulk upsert wide rows (time, site_id PK) in ONE statement."""
+        if not rows:
+            return
+        columns = [c for c in rows[0].keys() if c in ("time", "site_id")] + [
+            c for c in rows[0].keys() if c not in ("time", "site_id")
+        ]
+        values = [{c: r.get(c) for c in columns} for r in rows]
+        stmt = (
+            insert(AwosMetrics)
+            .values(values)
+            .on_conflict_do_update(
+                index_elements=["time", "site_id"],
+                set_={
+                    c: getattr(stmt.excluded, c)
+                    for c in columns if c not in ("time", "site_id")
+                },
+            )
+        )
+        await session.execute(stmt)
 
     async def _ingest_site_minute(
         self,

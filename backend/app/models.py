@@ -139,3 +139,36 @@ class DailySlaOla(Base):
     uptime_pct: Mapped[float] = mapped_column(Float)
     open_events: Mapped[int] = mapped_column(Integer, default=0)
     closed_events: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class AwosMetrics(Base):
+    """Wide-columnar 1-minute observations (one row per (time, site_id)).
+
+    Mirrors migration 009. PK (time, site_id) enables idempotent
+    ON CONFLICT upserts and TimescaleDB columnar compression by site.
+    """
+    __tablename__ = "awos_metrics"
+
+    time: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    site_id: Mapped[str] = mapped_column(String(16), primary_key=True)
+    temp_c: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    dewp_c: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    rh_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    qnh_hpa: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    da_ft: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    wind_speed_kt: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    wind_dir_deg: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    gust_speed_kt: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    gust_dir_deg: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    rvr_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    vis_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    als_cd: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    rvr_dn: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    rls: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    lr1_100ft: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    sky_code: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    precip_mm: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    present_weather: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    solar_wm2: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    lightning: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    raw_line: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

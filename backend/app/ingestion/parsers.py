@@ -35,6 +35,7 @@ class ParsedMetric:
     text_value: Optional[str]
     is_valid: bool
     raw: str = ""
+    ts: Optional[datetime] = None    # the record's minute (for wide rows)
 
 
 @dataclass
@@ -141,7 +142,7 @@ def parse_one_minute_file(path, sensor_specs, default_ts=None) -> list[ParsedRec
                 rec.metrics.append(
                     ParsedMetric(
                         code, metric, val,
-                        token if not valid else None, valid, line,
+                        token if not valid else None, valid, line, ts,
                     )
                 )
         records.append(rec)

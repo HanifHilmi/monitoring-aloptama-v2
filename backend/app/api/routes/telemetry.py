@@ -187,3 +187,99 @@ async def site_component_availability(
         out.append({"day": day.isoformat(), "components_with_data": per_day.get(day.isoformat(), 0), "total_components": len(sensors)})
         day += timedelta(days=1)
     return {"site": site_slug, "days": out}
+
+
+# Wide-column metric alias -> awos_metrics column.
+WIDE_ALIAS = {
+    "TEMP": "temp_c", "DEWP": "dewp_c", "RH": "rh_pct",
+    "QNH": "qnh_hpa", "DA": "da_ft",
+    "WS": "wind_speed_kt", "WD": "wind_dir_deg",
+    "WGS": "gust_speed_kt", "WGD": "gust_dir_deg",
+    "RVR": "rvr_m", "VIS": "vis_m", "ALS": "als_cd", "D/N": "rvr_dn",
+    "LR1": "lr1_100ft", "SKY": "sky_code",
+    "RA": "precip_mm", "PW": "present_weather",
+    "SOL": "solar_wm2", "LTX": "lightning",
+}
+
+
+@router.get("/{site_slug}")
+async def get_wide_telemetry(
+    site_slug: str,
+    range: str = Query("today", pattern="^(1h|6h|24h|7d|30d|today|3d|week|month)$"),
+    start: str | None = Query(default=None, description="ISO-8601 UTC start (overrides range)"),
+    end: str | None = Query(default=None, description="ISO-8601 UTC end (overrides range)"),
+    metrics: str | None = Query(default=None, description="Comma-separated metric aliases"),
+    downsample: int | None = Query(default=None, ge=10, le=10000),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Fetch wide awos_metrics for a site over a window (UTC).
+
+    - metrics: comma-separated aliases (e.g. TEMP,WS,QNH) or wide column
+      names (temp_c,wind_speed_kt). Defaults to numeric columns only.
+    - Returns: {"site":, "samples":[{time, <alias>: value, ...}]} plus
+      series/columns metadata.
+    """
+    def _parse_dt(v):
+        if not v:
+            return None
+        if v.endswith("Z"):
+            v = v[:-1] + "+00:00"
+        try:
+            return datetime.fromisoformat(v).astimezone(timezone.utc)
+        except ValueError:
+            return None
+
+    now = datetime.now(timezone.utc)
+    rng = RANGE_OPTIONS.get(range, "today")
+    if rng == "today":
+        s_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        e_dt = now
+    elif isinstance(rng, timedelta):
+        e_dt = now
+        s_dt = now - rng
+    else:
+        s_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        e_dt = now
+    if start:
+        p = _parse_dt(start)
+        if p: s_dt = p
+    if end:
+        p = _parse_dt(end)
+        if p: e_dt = p
+
+    # Resolve requested metrics to wide columns.
+    if metrics:
+        cols = [WIDE_ALIAS.get(m.strip(), m.strip()) for m in metrics.split(",") if m.strip()]
+    else:
+        cols = [
+            "temp_c", "dewp_c", "rh_pct", "qnh_hpa", "da_ft",
+            "wind_speed_kt", "wind_dir_deg", "gust_speed_kt", "gust_dir_deg",
+            "rvr_m", "vis_m", "als_cd", "lr1_100ft", "precip_mm", "solar_wm2",
+        ]
+
+    valid = {c.name for c in AwosMetrics.__table__.columns if c.name not in ("time", "site_id", "raw_line")}
+    cols = [c for c in cols if c in valid]
+
+    stmt = (
+        select(AwosMetrics)
+        .where(AwosMetrics.site_id == site_slug, AwosMetrics.time >= s_dt, AwosMetrics.time <= e_dt)
+        .order_by(AwosMetrics.time.asc())
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+
+    samples = []
+    for r in rows:
+        row = {"time": r.time}
+        for c in cols:
+            row[c] = getattr(r, c, None)
+        samples.append(row)
+
+    return {
+        "site": site_slug,
+        "metrics": cols,
+        "count": len(samples),
+        "samples": samples,
+        "range": range,
+        "start": s_dt,
+        "end": e_dt,
+    }
