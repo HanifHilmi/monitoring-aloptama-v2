@@ -1,7 +1,7 @@
 <script setup>
 import { api } from '@/api/client'
 import { computed, onBeforeUnmount, onMounted, onUnmounted, ref } from 'vue'
-import { formatDateTime, tooltipTime } from '@/utils/timezone'
+import { formatDateTime } from '@/utils/timezone'
 import { currentPeriod } from '@/utils/period'
 import DowntimeMap from '@/components/DowntimeMap.vue'
 import EChart from '@/components/EChart.vue'
@@ -91,7 +91,7 @@ const historyOption = computed(() => {
     grid: { left: 12, right: 16, top: 24, bottom: 0, containLabel: true },
     tooltip: { trigger: 'axis' },
     legend: { textStyle: { color: '#94a3b8' }, top: 0 },
-    xAxis: { type: 'time', axisLabel: { color: '#64748b', fontSize: 11, formatter: (v) => tooltipTime(v) } },
+    xAxis: { type: 'time', axisLabel: { color: '#64748b', fontSize: 11 } },
     yAxis: { type: 'value', min: 0, max: 100, axisLabel: { color: '#64748b', fontSize: 11, formatter: '{value}%' } },
     series: [
       { name: 'SLA', type: 'bar', data: rows.map((r) => [r.day, r.sla_pct]), itemStyle: { color: '#10b981', opacity: 0.75 } },
