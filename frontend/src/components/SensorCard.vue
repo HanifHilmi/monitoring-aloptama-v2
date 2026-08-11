@@ -17,6 +17,10 @@ const error = ref(null)
 const refreshTick = ref(0)
 let pollTimer = null
 
+// Rolling window: keep the picker's start, but roll END to 'now' each poll
+// so new /oneminute rows (past the originally-pinned end) appear live.
+const liveWin = ref(props.win ? { ...props.win } : null)
+
 const chartMetrics = computed(() => {
   const list = (props.sensor.chart_metrics || '').split(',').map((m) => m.trim()).filter(Boolean)
   // Defaults per sensor code when chart_metrics not populated yet.
@@ -42,7 +46,7 @@ async function load() {
     const all = await Promise.all(
       chartMetrics.value.map(async (m) => {
         try {
-          const d = await api.getTelemetry(props.siteSlug, props.sensor.code, props.range, 1500, m, props.win)
+          const d = await api.getTelemetry(props.siteSlug, props.sensor.code, props.range, 1500, m, liveWin.value)
           return [m, d.series || d.points || d.samples || []]  // v2: series[]
         } catch {
           return [m, metrics.value[m] || []]  // keep last-known on error
@@ -88,7 +92,7 @@ const METRIC_META = {
 const COLORS = ['#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#f472b6', '#fb7185']
 
 const chartOption = computed(() => {
-  const win = props.win || {}
+  const win = liveWin.value || props.win || {}
   const xMin = win.start || undefined
   const xMax = win.end || undefined
 
@@ -147,13 +151,21 @@ const gustStats = computed(() => {
   return { max, direction: d, count: wgs.filter((p) => p.value != null && p.value > 0).length }
 })
 
-watch(() => [props.range, props.sensor.id, props.win?.start, props.win?.end], load, { deep: true })
+watch(() => [props.range, props.sensor.id, props.win?.start, props.win?.end], () => {
+  if (props.win) liveWin.value = { ...props.win }
+  load()
+}, { deep: true })
 load()  // ALWAYS load — never skip data fetching for any component
 
 // Auto-refresh every 15s so the graph advances with the 1-minute /oneminute
 // cadence. load() no longer clears metrics, and refreshTick++ forces EChart
 // to re-render even if the option identity is unchanged.
 async function poll() {
+  // Roll the window END to the current time so the query returns rows up
+  // to NOW (previously it was pinned to the picker-time end -> froze).
+  if (liveWin.value) {
+    liveWin.value = { ...liveWin.value, end: new Date().toISOString() }
+  }
   await load()
   refreshTick.value++
 }
