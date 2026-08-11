@@ -14,13 +14,31 @@ let chart = null
 let observer = null
 
 const pad = (n) => String(n).padStart(2, '0')
+const MONTHS3 = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
-// Compact UTC label for a time-axis tick. Receives a ms epoch (or Date).
-// Always derived with getUTC* so the DEVICE timezone can never affect it.
-function utcAxisTick(v) {
+function toDate(v) {
   const d = typeof v === 'number' || typeof v === 'string' ? new Date(Number.isFinite(+v) ? +v : v) : v
-  if (!(d instanceof Date) || Number.isNaN(d.getTime())) return String(v ?? '')
-  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`
+  return d instanceof Date && !Number.isNaN(d.getTime()) ? d : null
+}
+
+// Smart UTC axis label. No seconds. When the range spans long windows:
+// - a 00:00 UTC tick shows the day (e.g. '01' for the 1st),
+// - if the range covers multiple months, the transition tick shows the
+//   month name (e.g. 'Aug') instead of the day.
+// Honors ECharts' call pattern (params.value = epoch ms) and never uses the
+// device timezone (all getUTC*).
+function utcAxisTick(v, rangeDays) {
+  const d = toDate(typeof v === 'object' && v && v.value != null ? v.value : v)
+  if (!d) return String(v?.value ?? v ?? '')
+  const hhmm = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`
+  const isMidnight = d.getUTCHours() === 0 && d.getUTCMinutes() === 0
+  if (!isMidnight) return hhmm
+  const day = d.getUTCDate()
+  const days = rangeDays ?? 0
+  // > ~45 days => show month label at midnight transitions
+  if (days > 45 && day === 1) return MONTHS3[d.getUTCMonth()]
+  // multi-day range => day number; single-day/minute range => HH:MM
+  return days > 1 ? String(day) : hhmm
 }
 
 // Deep-apply UTC rendering to a chart option WITHOUT changing the data.
@@ -49,7 +67,12 @@ function applyUtc(option) {
   const next = axes.map((ax) => {
     const a = { ...ax }
     if (a.type === 'time' && a.axisLabel && typeof a.axisLabel.formatter !== 'function') {
-      a.axisLabel = { ...a.axisLabel, formatter: utcAxisTick }
+      // Compute the span (in days) from the axis min/max so the label style
+      // can be chosen (HH:mm vs day vs month) without any data change.
+      const minD = toDate(a.min)
+      const maxD = toDate(a.max)
+      const rangeDays = minD && maxD ? (maxD - minD) / 86400000 : 0
+      a.axisLabel = { ...a.axisLabel, formatter: (v) => utcAxisTick(v, rangeDays) }
       changed = true
     }
     return a
