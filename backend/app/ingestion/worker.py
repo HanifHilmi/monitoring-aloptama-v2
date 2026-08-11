@@ -273,18 +273,15 @@ class IngestionWorker:
             c for c in rows[0].keys() if c not in ("time", "site_id")
         ]
         values = [{c: r.get(c) for c in columns} for r in rows]
-        stmt = (
-            insert(AwosMetrics)
-            .values(values)
-            .on_conflict_do_update(
-                index_elements=["time", "site_id"],
-                set_={
-                    c: getattr(stmt.excluded, c)
-                    for c in columns if c not in ("time", "site_id")
-                },
-            )
+        insert_stmt = insert(AwosMetrics)
+        upsert = insert_stmt.values(values).on_conflict_do_update(
+            index_elements=["time", "site_id"],
+            set_={
+                c: getattr(insert_stmt.excluded, c)
+                for c in columns if c not in ("time", "site_id")
+            },
         )
-        await session.execute(stmt)
+        await session.execute(upsert)
 
     async def _ingest_site_minute(
         self,
