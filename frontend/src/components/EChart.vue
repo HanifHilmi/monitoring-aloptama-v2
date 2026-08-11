@@ -61,17 +61,36 @@ function applyUtc(option) {
     out.tooltip = t
   }
 
-  // x-axes (single object or array)
+  // Determine the true span (days) from the SERIES data timestamps, which
+  // reflect the real window regardless of whether xAxis.min/max is set.
+  let dataRangeDays = 0
+  let minD = null, maxD = null
+  const seriesList = Array.isArray(out.series) ? out.series : out.series ? [out.series] : []
+  for (const s of seriesList) {
+    const pts = Array.isArray(s.data) ? s.data : []
+    for (const p of pts) {
+      const t = Array.isArray(p) ? p[0] : (p && (p.time ?? p.value0))
+      const d = toDate(t)
+      if (!d) continue
+      if (minD === null || d < minD) minD = d
+      if (maxD === null || d > maxD) maxD = d
+    }
+  }
+  if (minD && maxD) {
+    dataRangeDays = (maxD - minD) / 86400000
+  }
+  // Fall back to the axis min/max if present and no series span was found.
   const axes = Array.isArray(out.xAxis) ? out.xAxis : out.xAxis ? [out.xAxis] : []
   let changed = false
   const next = axes.map((ax) => {
     const a = { ...ax }
     if (a.type === 'time' && a.axisLabel && typeof a.axisLabel.formatter !== 'function') {
-      // Compute the span (in days) from the axis min/max so the label style
-      // can be chosen (HH:mm vs day vs month) without any data change.
-      const minD = toDate(a.min)
-      const maxD = toDate(a.max)
-      const rangeDays = minD && maxD ? (maxD - minD) / 86400000 : 0
+      let rangeDays = dataRangeDays
+      if (rangeDays === 0) {
+        const minD = toDate(a.min)
+        const maxD = toDate(a.max)
+        rangeDays = minD && maxD ? (maxD - minD) / 86400000 : 0
+      }
       a.axisLabel = { ...a.axisLabel, formatter: (v) => utcAxisTick(v, rangeDays) }
       changed = true
     }
