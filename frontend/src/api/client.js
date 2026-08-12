@@ -90,6 +90,27 @@ export const api = {
       }
     }
   },
+  backfillAll: async (onLine) => {
+    // Combined CDP+DCP backfill job (server-side, survives refresh).
+    const start = await (await fetch('/api/v1/backfill/all/start', { method: 'POST' })).json()
+    if (!start.ok) throw new Error(start.error || 'backfill start failed')
+    const res = await fetch(`/api/v1/backfill/job/${start.job_id}/stream`)
+    if (!res.ok || !res.body) throw new Error(`backfill failed: ${res.status}`)
+    const reader = res.body.getReader()
+    const dec = new TextDecoder()
+    let buf = ''
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += dec.decode(value, { stream: true })
+      const parts = buf.split('\n\n')
+      buf = parts.pop() || ''
+      for (const part of parts) {
+        const line = part.replace(/^data:\s*/, '').trim()
+        if (line) onLine(line)
+      }
+    }
+  },
   backfillDcp: async (onLine) => {
     const res = await fetch('/api/v1/backfill/dcp', { method: 'POST' })
     if (!res.ok || !res.body) throw new Error(`backfill failed: ${res.status}`)

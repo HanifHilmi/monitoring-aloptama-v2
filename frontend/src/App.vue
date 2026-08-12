@@ -64,7 +64,8 @@ async function runBackfill(kind) {
   backfillLog.value = ''
   const onLine = (l) => { backfillLog.value += l + '\n' }
   try {
-    if (kind === 'cdp') await api.backfillCdp(onLine)
+    if (kind === 'all') await api.backfillAll(onLine)
+    else if (kind === 'cdp') await api.backfillCdp(onLine)
     else await api.backfillDcp(onLine)
   } catch (e) {
     backfillLog.value += 'ERROR: ' + e.message + '\n'
@@ -183,6 +184,13 @@ onUnmounted(() => {
 
         <div v-if="settingTab === 'backfill'">
           <div class="mb-3 text-xs text-slate-400">Backfill historical data into the database from the CDP oneminute logs.</div>
+          <div class="mb-2 flex gap-2">
+            <button
+              class="w-full rounded bg-indigo-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+              :disabled="!!backfilling"
+              @click="runBackfill('all')"
+            >Backfill All (CDP + DCP)</button>
+          </div>
           <div class="flex gap-2">
             <button
               class="rounded bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"

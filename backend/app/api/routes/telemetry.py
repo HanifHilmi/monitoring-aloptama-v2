@@ -22,7 +22,11 @@ from app.utils.lttb import downsample_series
 router = APIRouter(prefix="/telemetry", tags=["telemetry"])
 
 RANGE_OPTIONS = {
+    "15m": timedelta(minutes=15),
+    "30m": timedelta(minutes=30),
     "1h": timedelta(hours=1),
+    "3h": timedelta(hours=3),
+    "12h": timedelta(hours=12),
     "6h": timedelta(hours=6),
     "24h": timedelta(hours=24),
     "7d": timedelta(days=7),
@@ -38,7 +42,7 @@ RANGE_OPTIONS = {
 async def get_sensor_telemetry(
     site_slug: str,
     sensor_code: str,
-    range: str = Query("today", pattern="^(1h|6h|24h|7d|30d|today|3d|week|month)$"),
+    range: str = Query("today", pattern="^(15m|30m|1h|3h|12h|1h|6h|24h|7d|30d|today|3d|week|month)$"),
     start: str | None = Query(default=None, description="ISO-8601 UTC start (overrides range)"),
     end: str | None = Query(default=None, description="ISO-8601 UTC end (overrides range)"),
     metric: str | None = Query(default=None),
@@ -205,7 +209,7 @@ WIDE_ALIAS = {
 @router.get("/{site_slug}")
 async def get_wide_telemetry(
     site_slug: str,
-    range: str = Query("today", pattern="^(1h|6h|24h|7d|30d|today|3d|week|month)$"),
+    range: str = Query("today", pattern="^(15m|30m|1h|3h|12h|1h|6h|24h|7d|30d|today|3d|week|month)$"),
     start: str | None = Query(default=None, description="ISO-8601 UTC start (overrides range)"),
     end: str | None = Query(default=None, description="ISO-8601 UTC end (overrides range)"),
     metrics: str | None = Query(default=None, description="Comma-separated metric aliases"),
