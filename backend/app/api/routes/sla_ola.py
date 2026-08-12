@@ -225,10 +225,10 @@ async def get_history(
     ).all()
     tel_rows = (
         await db.execute(
+            # Wide OLA history: per-day rows in awos_metrics (any column valid).
             text(
-                "SELECT date_trunc('day', time) AS day, "
-                "COUNT(*) FILTER (WHERE is_valid) AS valid, COUNT(*) AS total "
-                "FROM telemetry WHERE time >= :start AND time <= :end GROUP BY 1"
+                "SELECT date_trunc('day', time) AS day, COUNT(*) AS valid, COUNT(*) AS total "
+                "FROM awos_metrics WHERE time >= :start AND time <= :end GROUP BY 1"
             ),
             {"start": s, "end": e},
         )
