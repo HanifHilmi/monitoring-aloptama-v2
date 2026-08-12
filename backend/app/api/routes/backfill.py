@@ -25,7 +25,7 @@ from app.core.config import settings
 from app.db.session import AsyncSessionLocal
 from app.ingestion.cdp_reader import CdpReader
 from app.ingestion.parsers import parse_one_minute_file, parse_timestamp_from_filename
-from app.models import CdpConnectivity, CdpNode, Sensor, Site, Telemetry
+from app.models import AwosMetrics, CdpConnectivity, CdpNode, Sensor, Site
 
 router = APIRouter(prefix="/backfill", tags=["backfill"])
 logger = logging.getLogger(__name__)
@@ -181,7 +181,7 @@ async def _stream_dcp():
                                     if sensor is None:
                                         continue
                                     await session.execute(
-                                        insert(Telemetry)
+                                        insert(AwosMetrics)
                                         .values(
                                             time=rec.ts, sensor_id=sensor.id,
                                             metric=m.metric, value=m.value,
@@ -212,7 +212,7 @@ async def _stream_dcp():
                                     if not s.is_enabled:
                                         continue
                                     await session.execute(
-                                        insert(Telemetry)
+                                        insert(AwosMetrics)
                                         .values(time=minute, sensor_id=s.id, metric="missing",
                                                 value=None, text_value=None, status="missing",
                                                 is_valid=False)

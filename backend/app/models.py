@@ -78,19 +78,6 @@ class Sensor(Base):
     site: Mapped[Site] = relationship(back_populates="sensors")
 
 
-class Telemetry(Base):
-    __tablename__ = "telemetry"
-
-    time: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
-    sensor_id: Mapped[int] = mapped_column(ForeignKey("sensors.id", ondelete="CASCADE"), primary_key=True)
-    metric: Mapped[str] = mapped_column(String, primary_key=True, default="value")
-    value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    text_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(String, default="ok")
-    is_valid: Mapped[bool] = mapped_column(Boolean, default=True)
-    raw_line: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-
 class CdpConnectivity(Base):
     __tablename__ = "cdp_connectivity"
 

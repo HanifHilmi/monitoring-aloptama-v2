@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.session import get_db
-from app.models import CdpNode, Telemetry
+from app.models import CdpNode
 
 router = APIRouter(prefix="/system", tags=["system"])
 

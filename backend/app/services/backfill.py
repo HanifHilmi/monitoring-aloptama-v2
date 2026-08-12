@@ -58,7 +58,7 @@ async def is_database_uninitialized(session: AsyncSession) -> bool:
     appear even on a fresh database. Telemetry is the true signal for whether
     the historical backfill has populated sensor data.
     """
-    tel = (await session.execute(select(func.count(Telemetry.time)))).scalar_one()
+    tel = (await session.execute(select(func.count(AwosMetrics.time)))).scalar_one()
     return tel == 0
 
 
@@ -226,7 +226,7 @@ async def _ingest_minute(
             )
             for m in metrics:
                 await session.execute(
-                    insert(Telemetry)
+                    insert(AwosMetrics)
                     .values(
                         time=minute_ts, sensor_id=sensor.id,
                         metric=m.metric, value=m.value,

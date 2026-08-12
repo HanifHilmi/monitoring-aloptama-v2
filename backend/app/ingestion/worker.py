@@ -36,7 +36,6 @@ from app.models import (
     CdpNode,
     Sensor,
     Site,
-    Telemetry,
 )
 from app.services.rollup import rebuild_daily_rollups
 
@@ -367,62 +366,11 @@ class IngestionWorker:
             "Site %s minute %s: %d sensors parsed", site.code, ts, len(parsed)
         )
 
-    async def _persist_site_samples(
-        self,
-        session: AsyncSession,
-        site: Site,
-        sensor_nodes: dict[str, Sensor],
-        parsed_by_code: dict,
-        ts: datetime,
-    ) -> None:
-        for code, metrics in parsed_by_code.items():
-            sensor = sensor_nodes.get(code)
-            if sensor is None or not metrics:
-                continue
-            # A sensor is UP (OLA) for the minute if any metric is valid.
-            valid_count = sum(1 for m in metrics if m.is_valid)
-            total_count = len(metrics)
-            is_down = valid_count == 0
-            reason = "missing" if is_down else "ok"
+    async def _persist_site_samples(self, *args, **kwargs) -> None:
+        """Legacy EAV writer removed in step-2; OLA is driven from wide rows."""
+        return
 
-            # OLA state machine
-            await transition_ola(
-                session,
-                self.sm,
-                sensor_id=sensor.id,
-                site_id=site.id,
-                is_down=is_down,
-                ts=ts,
-                reason=reason,
-            )
 
-            # Upsert telemetry — one row per metric (WIDN multi-metric).
-            for m in metrics:
-                await session.execute(
-                    insert(Telemetry)
-                    .values(
-                        time=ts,
-                        sensor_id=sensor.id,
-                        metric=m.metric,
-                        value=m.value,
-                        text_value=m.text_value,
-                        status="ok" if m.is_valid else "invalid",
-                        is_valid=m.is_valid,
-                        raw_line=m.raw or None,
-                    )
-                    .on_conflict_do_update(
-                        index_elements=["time", "sensor_id", "metric"],
-                        set_={
-                            "value": m.value,
-                            "text_value": m.text_value,
-                            "status": "ok" if m.is_valid else "invalid",
-                            "is_valid": m.is_valid,
-                            "raw_line": m.raw or None,
-                        },
-                    )
-                )
-
-    # ------------------------------------------------------------------
     async def _rollup_loop(self) -> None:
         """Periodically rebuild daily SLA/OLA rollups."""
         async with AsyncSessionLocal() as session:

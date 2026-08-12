@@ -1,4 +1,4 @@
-"""Telemetry time-series endpoint (WIDN multi-metric, typed).
+"""AwosMetrics time-series endpoint (WIDN multi-metric, typed).
 
 Queries the ``telemetry`` hypertable for a sensor within a time range,
 optionally filtered by metric, then applies LTTB to numeric series.
@@ -16,7 +16,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.db.session import get_db
-from app.models import Site, Telemetry
+from app.models import Site, AwosMetrics
 from app.utils.lttb import downsample_series
 
 router = APIRouter(prefix="/telemetry", tags=["telemetry"])
@@ -90,14 +90,14 @@ async def get_sensor_telemetry(
     if not sensor.is_enabled:
         raise HTTPException(status_code=404, detail="sensor disabled")
 
-    stmt = select(Telemetry).where(
-        Telemetry.sensor_id == sensor.id,
-        Telemetry.time >= s_dt,
-        Telemetry.time <= e_dt,
+    stmt = select(AwosMetrics).where(
+        AwosMetrics.sensor_id == sensor.id,
+        AwosMetrics.time >= s_dt,
+        AwosMetrics.time <= e_dt,
     )
     if metric:
-        stmt = stmt.where(Telemetry.metric == metric)
-    stmt = stmt.order_by(Telemetry.time.asc())
+        stmt = stmt.where(AwosMetrics.metric == metric)
+    stmt = stmt.order_by(AwosMetrics.time.asc())
     rows = (await db.execute(stmt)).scalars().all()
 
     # Determine available metrics (for chart-type-aware frontend).
