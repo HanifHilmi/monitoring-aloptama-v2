@@ -73,20 +73,26 @@ async def get_status_overview(
         sensors = []
         active_sensors = [s for s in site.sensors if s.is_enabled]
         # Decide component status from the WIDE awos_metrics table: a
-        # component is online when any of its columns has a fresh row.
-        wide_rows = (
+        # component is ONLINE only when its OWN columns have a fresh row.
+        site_rows = (
             await db.execute(
-                select(AwosMetrics.time)
+                select(AwosMetrics)
                 .where(AwosMetrics.site_id == site.slug, AwosMetrics.time >= stale_cutoff)
+                .order_by(AwosMetrics.time.desc())
                 .limit(2000)
             )
         ).scalars().all()
-        latest_time = max(wide_rows) if wide_rows else None
 
         for s in active_sensors:
             comp = s.component or s.code
             cols = COMPONENT_COLUMNS.get(comp, [])
-            fresh = latest_time is not None
+            # find the latest row where ANY of this component's columns is set
+            latest_comp = None
+            for r in site_rows:
+                if any(getattr(r, c) is not None for c in cols):
+                    latest_comp = r.time
+                    break
+            online = latest_comp is not None
             sensors.append({
                 "id": s.id,
                 "code": s.code,
@@ -95,8 +101,8 @@ async def get_status_overview(
                 "unit": s.unit,
                 "is_state": s.is_state,
                 "chart_metrics": s.chart_metrics,
-                "status": "ok" if (fresh and (cols or s.is_state)) else "stale",
-                "last_sample_time": latest_time,
+                "status": "ok" if online else "stale",
+                "last_sample_time": latest_comp,
             })
         # DCP state: ONLINE when at least ONE OTHER enabled component on
         # this site has fresh data; OFFLINE only when every component is stale.

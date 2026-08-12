@@ -154,6 +154,8 @@ async def _site_data_availability(db: AsyncSession, site: Site, start: datetime,
         "code": site.code,
         "name": site.name,
         "data_availability_pct": round(data_avail, 4),
+        "overall_valid": overall_valid,
+        "overall_expected": overall_expected,
         "components": comp_rows,
     }
 
@@ -181,11 +183,18 @@ async def get_summary(
 
     sla_pct = round(sum(c["uptime_pct"] for c in cdps) / len(cdps), 4) if cdps else 0.0
     ola_pct = round(sum(d["data_availability_pct"] for d in site_das) / len(site_das), 4) if site_das else 0.0
+    # Single 21-component overall: sum valid component-minutes over all sites
+    # (each site has 7 components) divided by (21 x period minutes). Should
+    # equal the per-site-avg when rows are complete.
+    overall_valid = sum(d.get("overall_valid", 0.0) for d in site_das)
+    overall_expected = sum(d.get("overall_expected", 0.0) for d in site_das)
+    ola_pct_21 = round((overall_valid / overall_expected * 100.0), 4) if overall_expected else 0.0
 
     return {
         "generated_at": now,
         "range": range,
         "start_date": s,
+        "ola_pct_21": ola_pct_21,
         "end_date": e,
         "sla_pct": sla_pct,
         "ola_pct": ola_pct,
