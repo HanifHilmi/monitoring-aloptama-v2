@@ -149,6 +149,23 @@ async def _ingest_minute(
     ts: datetime,
 ) -> None:
     minute_ts = ts.replace(second=0, microsecond=0)
+
+    # The WIDN oneminute file is a single shared "091" file. Resolve it
+    # ONCE (try every site's prefixes), then parse it for every site so all
+    # three runway reports are backfilled from the same file.
+    one_min_path = None
+    raw_path = None
+    for site in sites:
+        for prefix in site.file_prefixes or []:
+            p = reader.resolve_site_file(prefix, minute_ts)
+            if p is not None and p.exists():
+                one_min_path = p
+                raw_path = reader.resolve_raw_sensor_file(prefix, minute_ts)
+                break
+        if one_min_path is not None:
+            break
+    default_ts = parse_timestamp_from_filename(one_min_path.name) if one_min_path else minute_ts
+
     for site in sites:
         site_sensors = sensors_by_site.get(site.id, [])
         if not site_sensors:
@@ -170,21 +187,13 @@ async def _ingest_minute(
             specs[s.code] = entry
             sensor_nodes[s.code] = s
 
-        # Try each site file prefix. SLA = file exists and parsed.
+        # Parse the shared file for THIS site (station-specific columns).
         parsed_batch: dict = {}
-        for prefix in site.file_prefixes or []:
-            one_min_path = reader.resolve_site_file(prefix, minute_ts)
-            raw_path = reader.resolve_raw_sensor_file(prefix, minute_ts)
-            if one_min_path is None or raw_path is None:
-                continue
-            default_ts = parse_timestamp_from_filename(one_min_path.name) or minute_ts
+        if one_min_path is not None:
             parsed_batch = parse_site_batch(one_min_path, raw_path, specs, default_ts)
-            if parsed_batch:
-                break
 
         # SLA: file availability per CDP node. Both nodes share the connect
-        # status in the SLA view; use the active reader's reachability plus
-        # whether a file was actually read.
+        # status in the SLA view.
         file_up = bool(parsed_batch)
         for node in reader.state.nodes.values():
             await transition_sla(
@@ -195,8 +204,7 @@ async def _ingest_minute(
         if not parsed_batch:
             continue
 
-        # ALSO persist WIDE awos_metrics rows + component OLA (feeds the
-        # awos_metrics-based SLA/OLA/status/runway paths). EAV kept for parity.
+        # Persist WIDE awos_metrics rows + component OLA for this site.
         for row in [r for r in _group_wide_static(parsed_batch, site.slug)
                     if r["time"] == minute_ts]:
             await session.execute(_wide_upsert(row))

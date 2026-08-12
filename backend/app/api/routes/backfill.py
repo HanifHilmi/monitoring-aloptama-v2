@@ -266,10 +266,11 @@ _job_counter = 0
 
 async def _run_job(job_id: str, kind: str) -> None:
     _JOBS[job_id]["status"] = "running"
-    gen = _stream_cdp() if kind == "cdp" else _stream_dcp()
+    gens = [_stream_cdp(), _stream_dcp()] if kind == "all" else ([_stream_cdp()] if kind == "cdp" else [_stream_dcp()])
     try:
-        async for line in gen:
-            _JOBS[job_id]["lines"].append(line)
+        for gen in gens:
+            async for line in gen:
+                _JOBS[job_id]["lines"].append(line)
         _JOBS[job_id]["status"] = "done"
     except Exception as exc:  # noqa: BLE001
         _JOBS[job_id]["lines"].append(f"ERROR: {exc}")
@@ -287,7 +288,7 @@ def _new_job(kind: str) -> str:
 
 @router.post("/{kind}/start", tags=["backfill"])
 async def start_backfill(kind: str) -> dict:
-    if kind not in ("cdp", "dcp"):
+    if kind not in ("cdp", "dcp", "all"):
         return {"ok": False, "error": "kind must be cdp or dcp"}
     job_id = _new_job(kind)
     return {"ok": True, "job_id": job_id}
