@@ -84,7 +84,9 @@ async def get_status_overview(
         ).scalars().all()
 
         for s in active_sensors:
-            comp = s.component or s.code
+            comp = (s.component or s.code)
+            # RWY04 RVR uses alias 'RVR_ALS' - map to canonical
+            comp = {'RVR_ALS': 'RVR'}.get(comp, comp)
             cols = COMPONENT_COLUMNS.get(comp, [])
             # find the latest row where ANY of this component's columns is set
             latest_comp = None

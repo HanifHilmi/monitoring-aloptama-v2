@@ -153,7 +153,7 @@ onUnmounted(() => {
               <div class="flex justify-between"><span class="text-slate-400">API</span><span class="text-emerald-400">{{ health.components?.api?.status }}</span></div>
               <div class="flex justify-between"><span class="text-slate-400">Database</span><span :class="health.components?.database?.status === 'ok' ? 'text-emerald-400' : 'text-red-400'">{{ health.components?.database?.status }}</span></div>
               <div class="flex justify-between"><span class="text-slate-400">Worker</span><span :class="health.components?.worker?.status === 'ok' ? 'text-emerald-400' : 'text-amber-400'">{{ health.components?.worker?.status }}</span></div>
-              <div class="flex justify-between"><span class="text-slate-400">Telemetry rows</span><span class="text-slate-200">{{ health.components?.data?.telemetry_rows ?? '—' }}</span></div>
+              <div class="flex justify-between"><span class="text-slate-400">AWOS rows</span><span class="text-slate-200">{{ health.components?.data?.awos_rows ?? '—' }}</span></div>
             </div>
           </div>
           <!-- Gear settings (contains Backfill) -->

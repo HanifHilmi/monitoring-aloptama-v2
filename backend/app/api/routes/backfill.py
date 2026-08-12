@@ -258,6 +258,7 @@ async def backfill_dcp() -> StreamingResponse:
 # as an asyncio task in the backend process so a page refresh never stops
 # it.  GET /backfill/job/{job_id}/stream replays the log lines (SSE).
 # ----------------------------------------------------------------------
+import asyncio
 import asyncio as _asyncio
 
 _JOBS: dict[str, dict] = {}   # job_id -> {kind, status, lines[]}
