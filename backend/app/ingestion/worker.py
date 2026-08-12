@@ -187,11 +187,19 @@ class IngestionWorker:
                     # skipped above (is_valid False) so the column stays NULL.
                     row[column] = m.value if m.value is not None else 0
         # WGS/WGD are tied to WS/WD: if wind is missing (///) the sensor is
-        # OFFLINE -> gust becomes NULL regardless of the empty-healthy rule.
+        # OFFLINE -> gust = NULL. If wind is ONLINE/valid, gust is 0 when the
+        # WGS/WGD fields are missing or empty (offline WGS/WGD columns parse
+        # to None and are skipped above, so default them to 0 here).
         for row in rows.values():
-            if row.get("wind_speed_kt") is None or row.get("wind_dir_deg") is None:
+            wind_ok = row.get("wind_speed_kt") is not None and row.get("wind_dir_deg") is not None
+            if not wind_ok:
                 row["gust_speed_kt"] = None
                 row["gust_dir_deg"] = None
+            else:
+                if row.get("gust_speed_kt") is None:
+                    row["gust_speed_kt"] = 0
+                if row.get("gust_dir_deg") is None:
+                    row["gust_dir_deg"] = 0
         return list(rows.values())
 
     async def _ingest_latest(self, session: AsyncSession) -> None:
