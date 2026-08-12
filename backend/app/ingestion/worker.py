@@ -159,8 +159,8 @@ class IngestionWorker:
         "WS": ("wind_speed_kt", False), "WD": ("wind_dir_deg", False),
         "WGS": ("gust_speed_kt", False), "WGD": ("gust_dir_deg", False),
         "RVR": ("rvr_m", False), "VIS": ("vis_m", False), "ALS": ("als_cd", False),
-        "D/N": ("rvr_dn", True), "RLS": ("rls", False),
-        "LR1": ("lr1_100ft", False), "SKY": ("sky_code", True),
+        "D/N": ("als_dn", True), "RLS": ("rls", False),
+        "LR1": ("lr1_100ft", False), "SKY": ("sky_condition", True),
         "RA": ("precip_mm", False), "PW": ("present_weather", True),
         "SOL": ("solar_wm2", False), "LTX": ("lightning", True),
     }

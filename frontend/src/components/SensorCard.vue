@@ -24,8 +24,8 @@ const liveWin = ref(props.win ? { ...props.win } : null)
 const WIDE_COL = {
   TEMP: 'temp_c', DEWP: 'dewp_c', RH: 'rh_pct', QNH: 'qnh_hpa', DA: 'da_ft',
   WS: 'wind_speed_kt', WD: 'wind_dir_deg', WGS: 'gust_speed_kt', WGD: 'gust_dir_deg',
-  RVR: 'rvr_m', VIS: 'vis_m', ALS: 'als_cd', 'D/N': 'rvr_dn',
-  LR1: 'lr1_100ft', SKY: 'sky_code', RA: 'precip_mm', PW: 'present_weather',
+  RVR: 'rvr_m', VIS: 'vis_m', ALS: 'als_cd', 'D/N': 'als_dn',
+  LR1: 'lr1_100ft', SKY: 'sky_condition', RA: 'precip_mm', PW: 'present_weather',
   SOL: 'solar_wm2', LTX: 'lightning',
 }
 

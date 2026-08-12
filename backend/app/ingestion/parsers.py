@@ -140,14 +140,20 @@ def parse_one_minute_file(path, sensor_specs, default_ts=None) -> list[ParsedRec
                 continue
             for metric, start, end, scale in spec:
                 token = padded[start:end].strip()
-                val = coerce_value(token)
+                is_text = scale is None
+                val = coerce_value(token)  # None for explicit missing/'', else numeric (0 for empty)
                 if scale is not None and val is not None:
                     val = round(val * scale, 6)
-                valid = val is not None
+                # Numeric: valid when not explicit-missing (empty -> 0 healthy).
+                # Text: valid when a non-missing token exists; empty stays ''.
+                if is_text:
+                    valid = token not in MISSING
+                else:
+                    valid = val is not None
                 rec.metrics.append(
                     ParsedMetric(
                         code, metric, val,
-                        token if not valid else None, valid, line, ts,
+                        token if is_text else None, valid, line, ts,
                     )
                 )
         records.append(rec)
