@@ -25,9 +25,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.ingestion.parsers import parse_site_batch, parse_timestamp_from_filename
+from app.ingestion.components import SITE_COMPONENTS, wide_row_components, row_dcp_online
 from app.ingestion.state_machine import (
     DowntimeStateMachine,
-    transition_ola,
+    transition_ola_component,
     transition_sla,
 )
 from app.models import (
@@ -35,7 +36,7 @@ from app.models import (
     CdpNode,
     Sensor,
     Site,
-    Telemetry,
+    AwosMetrics,
 )
 from app.ingestion.cdp_reader import CdpReader
 from app.services.rollup import rebuild_daily_rollups
@@ -194,6 +195,23 @@ async def _ingest_minute(
         if not parsed_batch:
             continue
 
+        # ALSO persist WIDE awos_metrics rows + component OLA (feeds the
+        # awos_metrics-based SLA/OLA/status/runway paths). EAV kept for parity.
+        for row in [r for r in _group_wide_static(parsed_batch, site.slug)
+                    if r["time"] == minute_ts]:
+            await session.execute(_wide_upsert(row))
+        present: set = set()
+        for row in [r for r in _group_wide_static(parsed_batch, site.slug)
+                    if r["time"] == minute_ts]:
+            present |= set(wide_row_components(row))
+            if row_dcp_online(row):
+                present.add("DCP")
+        for comp in list(SITE_COMPONENTS.get(site.slug, [])) + ["DCP"]:
+            await transition_ola_component(
+                session, sm, site_id=site.id, component_code=comp,
+                is_down=comp not in present, ts=minute_ts,
+            )
+
         # Persist telemetry + OLA availability per sensor.
         for code, metrics in parsed_batch.items():
             sensor = sensor_nodes.get(code)
@@ -228,3 +246,18 @@ async def _ingest_minute(
                         },
                     )
                 )
+
+
+def _wide_upsert(row: dict):
+    from sqlalchemy.dialects.postgresql import insert as _ins
+    ins = _ins(AwosMetrics)
+    return ins.values([row]).on_conflict_do_update(
+        index_elements=["time", "site_id"],
+        set_={c: getattr(ins.excluded, c) for c in row if c not in ("time", "site_id")},
+    )
+
+
+def _group_wide_static(parsed_by_code: dict, site_id: str) -> list[dict]:
+    """Collapse one parsed minute into wide awos_metrics row(s)."""
+    from app.ingestion.worker import IngestionWorker
+    return IngestionWorker._group_wide(parsed_by_code, site_id)
