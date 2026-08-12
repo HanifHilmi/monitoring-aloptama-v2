@@ -48,17 +48,18 @@ async def system_health(
     # container it is not; for the worker container it is).
     worker_running = "worker" in (os.getenv("WORKER_MODE", "") or process_name())
 
-    telemetry_count = 0
+    awos_count = 0
     try:
-        telemetry_count = (
+        awos_count = (
             await db.execute(
-                text("SELECT COUNT(*) FROM telemetry")
+                text("SELECT COUNT(*) FROM awos_metrics")
             )
         ).scalar_one()
     except Exception:
-        telemetry_count = 0
+        awos_count = 0
 
     recent_connectivity = False
+    recent_awos = False
     try:
         recent_connectivity = (
             await db.execute(
@@ -68,8 +69,17 @@ async def system_health(
                 )
             )
         ).scalar_one() > 0
+        recent_awos = (
+            await db.execute(
+                text(
+                    "SELECT COUNT(*) FROM awos_metrics "
+                    "WHERE time > NOW() - INTERVAL '5 minutes'"
+                )
+            )
+        ).scalar_one() > 0
     except Exception:
         recent_connectivity = False
+        recent_awos = False
 
     return {
         "generated_at": generated,
@@ -81,12 +91,12 @@ async def system_health(
                 "error": db_error,
             },
             "worker": {
-                "status": "ok" if worker_running or recent_connectivity else "unknown",
+                "status": "ok" if worker_running or recent_connectivity or recent_awos else "unknown",
                 "running_in_container": worker_running,
                 "recent_connectivity": recent_connectivity,
             },
             "data": {
-                "telemetry_rows": telemetry_count,
+                "awos_rows": awos_count,
             },
         },
         "config": {

@@ -267,10 +267,26 @@ _job_counter = 0
 async def _run_job(job_id: str, kind: str) -> None:
     _JOBS[job_id]["status"] = "running"
     gens = [_stream_cdp(), _stream_dcp()] if kind == "all" else ([_stream_cdp()] if kind == "cdp" else [_stream_dcp()])
-    try:
-        for gen in gens:
+
+    async def _drain(label: str, gen) -> None:
+        try:
             async for line in gen:
                 _JOBS[job_id]["lines"].append(line)
+            _JOBS[job_id]["lines"].append(f"{label} COMPLETE")
+        except Exception as exc:  # noqa: BLE001
+            _JOBS[job_id]["lines"].append(f"{label} ERROR: {exc}")
+
+    try:
+        # Run all streams CONCURRENTLY (CDP + DCP at the same time) so the
+        # combined backfill isn't serial, and to avoid greenlet_spawn issues
+        # from chaining async generators in one task.
+        if kind == "all":
+            await asyncio.gather(
+                _drain("CDP backfill", gens[0]),
+                _drain("DCP backfill", gens[1]),
+            )
+        else:
+            await _drain("Backfill", gens[0])
         _JOBS[job_id]["status"] = "done"
     except Exception as exc:  # noqa: BLE001
         _JOBS[job_id]["lines"].append(f"ERROR: {exc}")
