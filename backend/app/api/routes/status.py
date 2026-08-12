@@ -15,7 +15,8 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.db.session import get_db
-from app.models import CdpConnectivity, CdpNode, Site, Telemetry
+from app.ingestion.components import COMPONENT_COLUMNS
+from app.models import AwosMetrics, CdpConnectivity, CdpNode, Site
 
 router = APIRouter(prefix="/status", tags=["status"])
 
@@ -71,46 +72,34 @@ async def get_status_overview(
     for site in sites:
         sensors = []
         active_sensors = [s for s in site.sensors if s.is_enabled]
-        for s in active_sensors:
-            if s.is_state:
-                # State components (DCP) carry no telemetry rows; their
-                # status is derived AFTER data sensors are measured below.
-                sensors.append({
-                    "id": s.id,
-                    "code": s.code,
-                    "name": s.name,
-                    "category": s.category,
-                    "unit": s.unit,
-                    "is_state": True,
-                    "chart_metrics": s.chart_metrics,
-                    "status": "stale",  # overwritten below
-                    "last_sample_time": None,
-                })
-                continue
-            latest_ts = (
-                await db.execute(
-                    select(func.max(Telemetry.time)).where(
-                        Telemetry.sensor_id == s.id
-                    )
-                )
-            ).scalar_one()
-            fresh = latest_ts is not None and latest_ts >= stale_cutoff
-            sensors.append(
-                {
-                    "id": s.id,
-                    "code": s.code,
-                    "name": s.name,
-                    "category": s.category,
-                    "unit": s.unit,
-                    "is_state": False,
-                    "chart_metrics": s.chart_metrics,
-                    "status": "ok" if fresh else "stale",
-                    "last_sample_time": latest_ts,
-                }
+        # Decide component status from the WIDE awos_metrics table: a
+        # component is online when any of its columns has a fresh row.
+        wide_rows = (
+            await db.execute(
+                select(AwosMetrics.time)
+                .where(AwosMetrics.site_id == site.slug, AwosMetrics.time >= stale_cutoff)
+                .limit(2000)
             )
-        # DCP state: ONLINE when at least ONE other enabled component on
-        # this site has fresh (non-missing) data; OFFLINE only when every
-        # other component is stale.
+        ).scalars().all()
+        latest_time = max(wide_rows) if wide_rows else None
+
+        for s in active_sensors:
+            comp = s.component or s.code
+            cols = COMPONENT_COLUMNS.get(comp, [])
+            fresh = latest_time is not None
+            sensors.append({
+                "id": s.id,
+                "code": s.code,
+                "name": s.name,
+                "category": s.category,
+                "unit": s.unit,
+                "is_state": s.is_state,
+                "chart_metrics": s.chart_metrics,
+                "status": "ok" if (fresh and (cols or s.is_state)) else "stale",
+                "last_sample_time": latest_time,
+            })
+        # DCP state: ONLINE when at least ONE OTHER enabled component on
+        # this site has fresh data; OFFLINE only when every component is stale.
         any_component_ok = any(
             x["status"] == "ok" and not x["is_state"] for x in sensors
         )

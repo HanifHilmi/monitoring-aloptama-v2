@@ -61,6 +61,8 @@ async def load_open_events(session: AsyncSession, sm: DowntimeStateMachine) -> N
             sm.set_open_since("sla", "cdp", ev.cdp_id, ev.start_time)
         elif ev.scope_type == "ola" and ev.sensor_id is not None:
             sm.set_open_since("ola", "sensor", ev.sensor_id, ev.start_time)
+        elif ev.scope_type == "ola" and ev.site_id is not None and ev.component_code is not None:
+            sm.set_open_since("ola", "component", (ev.site_id, ev.component_code), ev.start_time)
 
 
 async def transition_sla(
@@ -130,11 +132,47 @@ async def transition_ola(
     return None
 
 
+async def transition_ola_component(
+    session: AsyncSession,
+    sm: DowntimeStateMachine,
+    site_id: int,
+    component_code: str,
+    is_down: bool,
+    ts: datetime,
+) -> Optional[DowntimeEvent]:
+    """Transition OLA state for a (site_id, component_code) entity."""
+    key = (site_id, component_code)
+    open_since = sm.get_open_since("ola", "component", key)
+    if not is_down:
+        if open_since is not None:
+            ev = await _close_event(session, site_id=site_id, component_code=component_code, end=ts)
+            sm.clear("ola", "component", key)
+            return ev
+        return None
+    if open_since is None:
+        sm.set_open_since("ola", "component", key, ts)
+        ev = DowntimeEvent(
+            scope_type="ola",
+            entity_type="component",
+            site_id=site_id,
+            component_code=component_code,
+            start_time=ts,
+            reason_code="missing",
+            details={"transitioned_to": "down"},
+        )
+        session.add(ev)
+        await session.flush()
+        return ev
+    return None
+
+
 async def _close_event(
     session: AsyncSession,
     *,
     cdp_id: Optional[int] = None,
     sensor_id: Optional[int] = None,
+    site_id: Optional[int] = None,
+    component_code: Optional[str] = None,
     end: datetime,
 ) -> Optional[DowntimeEvent]:
     """Close the oldest open event for the entity, computing duration."""
@@ -149,6 +187,17 @@ async def _close_event(
         stmt = (
             select(DowntimeEvent)
             .where(DowntimeEvent.sensor_id == sensor_id, DowntimeEvent.end_time.is_(None))
+            .order_by(DowntimeEvent.start_time)
+            .limit(1)
+        )
+    elif site_id is not None and component_code is not None:
+        stmt = (
+            select(DowntimeEvent)
+            .where(
+                DowntimeEvent.site_id == site_id,
+                DowntimeEvent.component_code == component_code,
+                DowntimeEvent.end_time.is_(None),
+            )
             .order_by(DowntimeEvent.start_time)
             .limit(1)
         )

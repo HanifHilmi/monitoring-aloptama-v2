@@ -21,11 +21,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal
 from app.ingestion.cdp_reader import CdpReader
+from app.ingestion.components import row_dcp_online, site_components, wide_row_components
 from app.ingestion.parsers import parse_site_batch, parse_timestamp_from_filename
 from app.ingestion.state_machine import (
     DowntimeStateMachine,
     load_open_events,
     transition_ola,
+    transition_ola_component,
     transition_sla,
 )
 from app.models import (
@@ -274,6 +276,25 @@ class IngestionWorker:
         ]
         if not rows:
             return
+
+        # NEW OLA source: per-(site, component) validity from wide rows.
+        present: set[str] = set()
+        for r in rows:
+            for comp in wide_row_components(r):
+                present.add(comp)
+                await transition_ola_component(
+                    session, self.sm, site_id=site.id, component_code=comp,
+                    is_down=False, ts=r["time"],
+                )
+            if row_dcp_online(r):
+                present.add("DCP")
+        # Open OLA downtime only for configured components missing this minute.
+        for comp in site_components(site.slug):
+            if comp not in present:
+                await transition_ola_component(
+                    session, self.sm, site_id=site.id, component_code=comp,
+                    is_down=True, ts=now,
+                )
 
         await self._persist_site_samples(session, site, sensor_nodes, parsed, now)
         await self._persist_site_wide(session, rows)

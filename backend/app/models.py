@@ -116,6 +116,7 @@ class DowntimeEvent(Base):
     entity_type: Mapped[str] = mapped_column(String)
     cdp_id: Mapped[Optional[int]] = mapped_column(ForeignKey("cdp_nodes.id", ondelete="CASCADE"), nullable=True)
     sensor_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sensors.id", ondelete="CASCADE"), nullable=True)
+    component_code: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     site_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), nullable=True)
     start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     end_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

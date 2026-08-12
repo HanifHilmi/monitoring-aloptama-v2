@@ -26,7 +26,8 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.models import CdpNode, Sensor, Site
+from app.ingestion.components import COMPONENT_COLUMNS, SITE_COMPONENTS
+from app.models import AwosMetrics, CdpNode, Sensor, Site
 
 router = APIRouter(prefix="/sla-ola", tags=["sla-ola"])
 
@@ -106,29 +107,41 @@ async def _site_data_availability(db: AsyncSession, site: Site, start: datetime,
         comp = s.component or s.code
         components.setdefault(comp, []).append(s.id)
 
-    rows = (
-        await db.execute(
-            text(
-                "SELECT sensor_id AS sid, COUNT(*) AS total, "
-                "COUNT(*) FILTER (WHERE is_valid) AS valid "
-                "FROM telemetry "
-                "WHERE sensor_id = ANY(:ids) AND time >= :start AND time <= :end "
-                "GROUP BY sensor_id"
-            ),
-            {"ids": [s.id for s in sensors], "start": start, "end": end},
-        )
-    ).all()
-    stats = {r.sid: (r.total or 0, r.valid or 0) for r in rows}
-
+    # NEW OLA source: component validity from the WIDE awos_metrics table.
     total_period_minutes = max(1, int((end - start).total_seconds() // 60))
+    all_rows = (
+        await db.execute(
+            select(AwosMetrics)
+            .where(AwosMetrics.site_id == site.slug, AwosMetrics.time >= start, AwosMetrics.time <= end)
+        )
+    ).scalars().all()
+
+    comp_counts: dict[str, int] = {}
+    dcp_present = 0
+    for r in all_rows:
+        for comp, cols in COMPONENT_COLUMNS.items():
+            if any(getattr(r, c) is not None for c in cols):
+                comp_counts[comp] = comp_counts.get(comp, 0) + 1
+                if comp in {"ATRH", "BARO", "ANEM", "RVR", "CEL", "PWX", "RAIN", "SOLR", "LIGH"}:
+                    dcp_present += 0
+        if any(getattr(r, c) is not None for c in
+               [cc for cols in COMPONENT_COLUMNS.values() for cc in cols]):
+            dcp_present = max(dcp_present, 1)
+
     comp_rows = []
-    overall_expected = 0
     overall_valid = 0
-    for comp, ids in sorted(components.items()):
-        observed = sum(stats.get(i, (0, 0))[0] for i in ids)
-        valid = sum(stats.get(i, (0, 0))[1] for i in ids)
-        # Expected = sensor-minutes for the whole period; missing = DOWN.
-        expected = len(ids) * total_period_minutes
+    overall_expected = 0
+    codes = list(SITE_COMPONENTS.get(site.slug, list(COMPONENT_COLUMNS))) + ["DCP"] if False else None
+    from app.ingestion.components import SITE_COMPONENTS
+    codes = list(SITE_COMPONENTS.get(site.slug, [])) + ["DCP"]
+    for comp in codes:
+        if comp == "DCP":
+            observed = dcp_present if dcp_present else 0
+            valid = dcp_present
+        else:
+            observed = comp_counts.get(comp, 0)
+            valid = observed
+        expected = total_period_minutes
         pct = (valid / expected * 100.0) if expected else 0.0
         comp_rows.append({"component": comp, "uptime_pct": round(pct, 4), "samples": observed})
         overall_expected += expected
