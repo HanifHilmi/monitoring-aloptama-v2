@@ -22,7 +22,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-MISSING = {"///", "//", "MM", "M", "N/A", "---", ""}
+# Explicit missing tokens => sensor OFFLINE => SQL NULL at write time.
+MISSING = {"///", "//", "MM", "M", "N/A", "---"}
 
 LINE_PAD = 350
 
@@ -46,7 +47,11 @@ class ParsedRecord:
 
 def coerce_value(raw: str) -> Optional[float]:
     token = raw.strip()
-    if not token or token in MISSING:
+    # Empty/whitespace = sensor ONLINE and healthy but no value to show:
+    # numeric 0 (text handled by the caller via text_value '').
+    if not token:
+        return 0.0
+    if token in MISSING:
         return None
     clean = token.replace(",", ".")
     try:

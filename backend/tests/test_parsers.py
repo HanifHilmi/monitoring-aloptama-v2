@@ -84,9 +84,11 @@ def test_parse_timestamp_invalid() -> None:
 
 def test_coerce_value() -> None:
     assert coerce_value("25.4") == 25.4
-    assert coerce_value("  ") is None
+    # Empty/whitespace = healthy, no value -> 0 (online, no event).
+    assert coerce_value("  ") == 0.0
     assert coerce_value("N/A") is None
     assert coerce_value("1,5") == 1.5
+    # Explicit missing tokens -> NULL (sensor OFFLINE).
     assert coerce_value("///") is None
     assert coerce_value("MMMM") is None
     assert coerce_value("D") is None  # string day/night flag

@@ -179,10 +179,19 @@ class IngestionWorker:
                 column, is_text = col
                 key = m.ts.replace(second=0, microsecond=0)
                 row = rows.setdefault(key, {"time": key, "site_id": site_id})
-                try:
-                    row[column] = m.text_value if is_text else m.value
-                except Exception:
-                    row[column] = None
+                if is_text:
+                    # Empty text field = healthy, no event -> empty string.
+                    row[column] = (m.text_value or "")
+                else:
+                    # Empty numeric field = healthy -> 0. Explicit missing is
+                    # skipped above (is_valid False) so the column stays NULL.
+                    row[column] = m.value if m.value is not None else 0
+        # WGS/WGD are tied to WS/WD: if wind is missing (///) the sensor is
+        # OFFLINE -> gust becomes NULL regardless of the empty-healthy rule.
+        for row in rows.values():
+            if row.get("wind_speed_kt") is None or row.get("wind_dir_deg") is None:
+                row["gust_speed_kt"] = None
+                row["gust_dir_deg"] = None
         return list(rows.values())
 
     async def _ingest_latest(self, session: AsyncSession) -> None:
