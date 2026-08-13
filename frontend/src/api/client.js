@@ -92,7 +92,12 @@ export const api = {
   },
   backfillAll: async (onLine, onJobId) => {
     // Combined CDP+DCP backfill job (server-side, survives refresh).
-    const start = await (await fetch('/api/v1/backfill/all/start', { method: 'POST' })).json()
+    const res = await fetch('/api/v1/backfill/all/start', { method: 'POST' })
+    if (!res.ok) {
+      const t = await res.text().catch(() => '')
+      throw new Error('backfill start failed: ' + res.status + (t ? ' ' + t.trim().slice(0, 100) : ''))
+    }
+    const start = await res.json()
     if (!start.ok) throw new Error(start.error || 'backfill start failed')
     if (onJobId) onJobId(start.job_id)
     await api.resumeBackfill(start.job_id, onLine)

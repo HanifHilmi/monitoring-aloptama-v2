@@ -88,7 +88,15 @@ async function resumeBackfill() {
     await api.resumeBackfill(lastJobId.value, (l) => { backfillLog.value += l + '\n' })
     backfillLog.value += '\n--- backfill finished ---\n'
   } catch (e) {
-    backfillLog.value = 'no in-flight backfill: ' + e.message
+    // 2xx/502/404 => no in-flight job (server restarted) -> clear + idle
+    const gone = /50[0-9]|404/.test(e.message)
+    if (gone) {
+      localStorage.removeItem('backfill_last_job')
+      lastJobId.value = ''
+      backfillLog.value = '— idle —'
+    } else {
+      backfillLog.value = 'no in-flight backfill: ' + e.message
+    }
   } finally {
     backfilling.value = ''
   }
