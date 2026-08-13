@@ -109,17 +109,31 @@ export const api = {
     const reader = res.body.getReader()
     const dec = new TextDecoder()
     let buf = ''
+    let ended = false
     for (;;) {
-      const { done, value } = await reader.read()
+      let r
+      try {
+        r = await reader.read()
+      } catch {
+        // Uvicorn/nginx/browser can abort the long SSE stream mid-frame;
+        // treat as end-of-stream (job data already drained) rather than an error.
+        ended = true
+        break
+      }
+      const { done, value } = r
       if (done) break
       buf += dec.decode(value, { stream: true })
       const parts = buf.split('\n\n')
       buf = parts.pop() || ''
       for (const part of parts) {
         const line = part.replace(/^data:\s*/, '').trim()
-        if (line) onLine(line)
+        if (line) {
+          onLine(line)
+          if (/^JOB (DONE|ERROR)/.test(line)) ended = true
+        }
       }
     }
+    if (!ended && buf.trim()) onLine(buf.replace(/^data:\s*/, '').trim())
   },
   backfillDcp: async (onLine) => {
     const res = await fetch('/api/v1/backfill/dcp', { method: 'POST' })
