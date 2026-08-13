@@ -122,11 +122,11 @@ async def _site_data_availability(db: AsyncSession, site: Site, start: datetime,
         for comp, cols in COMPONENT_COLUMNS.items():
             if any(getattr(r, c) is not None for c in cols):
                 comp_counts[comp] = comp_counts.get(comp, 0) + 1
-                if comp in {"ATRH", "BARO", "ANEM", "RVR", "CEL", "PWX", "RAIN", "SOLR", "LIGH"}:
-                    dcp_present += 0
-        if any(getattr(r, c) is not None for c in
-               [cc for cols in COMPONENT_COLUMNS.values() for cc in cols]):
-            dcp_present = max(dcp_present, 1)
+        # DCP is ONLINE for THIS minute when any non-DCP column has data,
+        # so it must count EVERY such minute (not cap at 1).
+        if any(getattr(r, c) is not None
+               for cc in COMPONENT_COLUMNS.values() for c in cc):
+            dcp_present += 1
 
     comp_rows = []
     overall_valid = 0
