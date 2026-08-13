@@ -37,7 +37,7 @@ services:
       CDP2_MOUNT_PATH: ${CDP2_MOUNT_PATH:-/mnt/cdp2_logs/}
       ENABLE_BACKFILL_ON_BOOT: ${ENABLE_BACKFILL_ON_BOOT:-false}
       ENABLE_MIGRATIONS_ON_BOOT: "true"
-      RESET_DB_ON_BOOT: ${RESET_DB_ON_BOOT:-true}
+      RESET_DB_ON_BOOT: ${RESET_DB_ON_BOOT:-false}
       ENVIRONMENT: ${ENVIRONMENT:-prod}
     volumes:
       - ${CDP1_MOUNT_PATH:-/mnt/cdp1_logs/}:/mnt/cdp1_logs
