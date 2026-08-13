@@ -57,27 +57,47 @@ const settingsOpen = ref(false)
 const settingTab = ref('backfill')
 const backfillLog = ref('')
 const backfilling = ref('')
+const lastJobId = ref(localStorage.getItem('backfill_last_job') || '')
 
 async function runBackfill(kind) {
   if (backfilling.value) return
   backfilling.value = kind
   backfillLog.value = ''
   const onLine = (l) => { backfillLog.value += l + '\n' }
+  const onJobId = (id) => {
+    lastJobId.value = id
+    localStorage.setItem('backfill_last_job', id)
+  }
   try {
-    if (kind === 'all') await api.backfillAll(onLine)
+    if (kind === 'all') { backfilling.value = 'all'; await api.backfillAll(onLine, onJobId) }
     else if (kind === 'cdp') await api.backfillCdp(onLine)
     else await api.backfillDcp(onLine)
   } catch (e) {
     backfillLog.value += 'ERROR: ' + e.message + '\n'
   } finally {
-    backfilling.value = ''
+    if (kind !== 'all') backfilling.value = ''
   }
 }
 
+async function resumeBackfill() {
+  if (!lastJobId.value) return
+  // server-side job may still be running; disable buttons + replay the log
+  backfilling.value = 'all'
+  backfillLog.value = ''
+  try {
+    await api.resumeBackfill(lastJobId.value, (l) => { backfillLog.value += l + '\n' })
+    backfillLog.value += '\n--- backfill finished ---\n'
+  } catch (e) {
+    backfillLog.value = 'no in-flight backfill: ' + e.message
+  } finally {
+    backfilling.value = ''
+  }
+}
 onMounted(() => {
   loadHealth()
   healthTimer = setInterval(loadHealth, 15_000)
   if (typeof document !== 'undefined') document.addEventListener('click', onDocClick)
+  resumeBackfill()
 })
 onUnmounted(() => {
   clearInterval(healthTimer)

@@ -90,12 +90,17 @@ export const api = {
       }
     }
   },
-  backfillAll: async (onLine) => {
+  backfillAll: async (onLine, onJobId) => {
     // Combined CDP+DCP backfill job (server-side, survives refresh).
     const start = await (await fetch('/api/v1/backfill/all/start', { method: 'POST' })).json()
     if (!start.ok) throw new Error(start.error || 'backfill start failed')
-    const res = await fetch(`/api/v1/backfill/job/${start.job_id}/stream`)
-    if (!res.ok || !res.body) throw new Error(`backfill failed: ${res.status}`)
+    if (onJobId) onJobId(start.job_id)
+    await this.resumeBackfill(start.job_id, onLine)
+  },
+  // Reconnect to an in-flight job: replays captured log lines then tails live.
+  resumeBackfill: async (jobId, onLine) => {
+    const res = await fetch(`/api/v1/backfill/job/${jobId}/stream`)
+    if (!res.ok || !res.body) throw new Error(`resume failed: ${res.status}`)
     const reader = res.body.getReader()
     const dec = new TextDecoder()
     let buf = ''
