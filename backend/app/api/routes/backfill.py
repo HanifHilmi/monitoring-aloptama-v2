@@ -56,72 +56,12 @@ def _resolve_day_file(reader, sites, day: datetime):
     return None, None
 
 
-async def _stream_cdp():
-    """CDP backfill, session-per-day: opens/closes a DB session for each day
-    and yields log lines only BETWEEN days (never while a session is open),
-    which avoids the greenlet_spawn/await_only error."""
-    nodes = (await (await _scoped_session()).execute(select(CdpNode))).close() if False else None
-    # load master tables once on its own session
-    async with AsyncSessionLocal() as s0:
-        nodes = (await s0.execute(select(CdpNode))).scalars().all()
-        sites = (await s0.execute(select(Site))).scalars().all()
-    reader = CdpReader(
-        [{"id": n.id, "name": n.name, "ip_address": str(n.ip_address),
-          "mount_path": n.mount_path, "role": n.role} for n in nodes]
-    )
-    target = _parse(settings.backfill_start).replace(second=0, microsecond=0)
-    target_day = _day_start(target)
-    now = datetime.now(timezone.utc)
-    cur_day = _day_start(now)
-    while cur_day >= target_day:
-        day_start = cur_day
-        day_end = min(cur_day + timedelta(days=1), now)
-        one_min, src = _resolve_day_file(reader, sites, cur_day)
-        present: set = set()
-        if one_min is not None:
-            try:
-                for rec in parse_one_minute_file(one_min, {}, cur_day):
-                    present.add(rec.ts.replace(second=0, microsecond=0))
-            except Exception:  # noqa: BLE001
-                present = set()
-        minutes_up = 0
-        total_minutes = max(1, int((day_end-day_start).total_seconds()//60))
-        # SESSION PER DAY: all DB writes in one tight block, never across yield.
-        async with AsyncSessionLocal() as session:
-            minute = day_end.replace(second=0, microsecond=0)
-            while minute > day_start:
-                minute -= timedelta(minutes=1)
-                if minute < target:
-                    continue
-                reachable = minute in present
-                if reachable:
-                    minutes_up += 1
-                for node in nodes:
-                    await session.execute(
-                        insert(CdpConnectivity)
-                        .values(time=minute, cdp_id=node.id, reachable=reachable, rtt_ms=None)
-                        .on_conflict_do_update(
-                            index_elements=["time", "cdp_id"],
-                            set_={"reachable": reachable, "error_message": None},
-                        )
-                    )
-            await session.commit()
-        # yield is AFTER the session closed
-        yield _sse(f"CDP backfill {cur_day.date()} up={minutes_up}/{total_minutes} src={src or 'MISSING'}")
-        cur_day -= timedelta(days=1)
-
-async def backfill_cdp() -> StreamingResponse:
-    return StreamingResponse(
-        _stream_cdp(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
-async def _stream_dcp():
-    """DCP/awos backfill with a single shared-file resolve + CDP failover +
-    dedupe, all writes inside a session-per-day (no yield across a session
-    -> avoids greenlet_spawn/await_only)."""
+async def _stream_all():
+    """Combined CDP + DCP backfill. For EACH day it resolves the shared
+    091 WIDN file ONCE, then in a SINGLE session writes:
+      - cdp_connectivity (per CDP node up/down for that minute),
+      - awos_metrics wide rows per site (with dedupe: skips minutes already
+        present). Yields a verbose per-day line after commit/close."""
     async with AsyncSessionLocal() as s0:
         nodes = (await s0.execute(select(CdpNode))).scalars().all()
         sites = (await s0.execute(select(Site))).scalars().all()
@@ -138,37 +78,64 @@ async def _stream_dcp():
     while cur_day >= target_day:
         day_start = cur_day
         day_end = min(cur_day + timedelta(days=1), now)
-        # FAILOVER: try every site prefix across BOTH CDPs until one resolves.
         one_min, src = _resolve_day_file(reader, sites, cur_day)
-        log = f"DCP backfill {cur_day.date()} src={src or 'MISSING'}"
-        if one_min is not None:
-            # SESSION PER DAY: all persistence here, commit once.
-            async with AsyncSessionLocal() as session:
-                day_rows = 0
+
+        # SESSION PER DAY: same file -> both CDP and awos writes.
+        async with AsyncSessionLocal() as session:
+            # timestamps present in the file for this day
+            present: set = set()
+            if one_min is not None:
+                try:
+                    for rec in parse_one_minute_file(one_min, {}, cur_day):
+                        present.add(rec.ts.replace(second=0, microsecond=0))
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("DCP backfill parse error %s: %s", src, exc)
+            minutes_up = 0
+            total_minutes = max(1, int((day_end-day_start).total_seconds()//60))
+            minute = day_end.replace(second=0, microsecond=0)
+            # CDP: per-node connectivity
+            while minute > day_start:
+                minute -= timedelta(minutes=1)
+                if minute < target:
+                    continue
+                reachable = minute in present
+                if reachable:
+                    minutes_up += 1
+                for node in nodes:
+                    await session.execute(
+                        insert(CdpConnectivity)
+                        .values(time=minute, cdp_id=node.id, reachable=reachable, rtt_ms=None)
+                        .on_conflict_do_update(
+                            index_elements=["time", "cdp_id"],
+                            set_={"reachable": reachable, "error_message": None},
+                        )
+                    )
+            # DCP: awos per site, dedupe per minute
+            site_rows: dict[str, int] = {}
+            site_skip: dict[str, int] = {}
+            if one_min is not None:
+                default_ts = parse_timestamp_from_filename(one_min.name) or cur_day
                 for site in sites:
                     site_sensors = [x for x in sensors if x.site_id == site.id]
                     if not site_sensors:
                         continue
-                    specs = {x.code: {"station": x.station or "04"} for x in site_sensors if x.is_enabled}
+                    specs = {x.code: {"station": x.station or "04"}
+                             for x in site_sensors if x.is_enabled}
                     if not specs:
                         continue
-                    default_ts = parse_timestamp_from_filename(one_min.name) or cur_day
                     recs = parse_one_minute_file(one_min, specs, default_ts)
                     for rec in recs:
                         rec_min = rec.ts.replace(second=0, microsecond=0)
                         if rec_min < target or rec_min > day_end:
                             continue
-                        wide = {}
-                        # cheap dedupe: only add a wide row if that (time,site) is absent
                         exists = (await session.execute(
                             select(func.count()).select_from(AwosMetrics).where(
                                 AwosMetrics.time == rec_min, AwosMetrics.site_id == site.slug
                             )
                         )).scalar_one() > 0
                         if exists:
+                            site_skip[site.slug] = site_skip.get(site.slug, 0) + 1
                             continue
-                        row = _group_wide_static({x.code: None for x in []}, site.slug) if False else None
-                        # collapse this minute's metrics into a wide row via worker helper
                         batch = {}
                         for mx in rec.metrics:
                             batch.setdefault(mx.sensor_code, []).append(mx)
@@ -176,56 +143,25 @@ async def _stream_dcp():
                             if r["time"] != rec_min:
                                 continue
                             await session.execute(_wide_upsert(r))
-                            day_rows += 1
-                await session.commit()
-                log += f" rows={day_rows}"
-        # yield only AFTER the session is closed
-        yield _sse(log)
+                            site_rows[site.slug] = site_rows.get(site.slug, 0) + 1
+            await session.commit()
+
+        per_site = " ".join(f"{k}={v}" for k, v in sorted(site_rows.items())) or "none"
+        skip_sum = sum(site_skip.values())
+        yield _sse(
+            f"BACKFILL {cur_day.date()} src={src or 'MISSING'} "
+            f"cdp_up={minutes_up}/{total_minutes} awos_rows=[{per_site}] "
+            f"skipped={skip_sum}"
+        )
         cur_day -= timedelta(days=1)
-
-async def backfill_dcp() -> StreamingResponse:
-    return StreamingResponse(
-        _stream_dcp(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-# ----------------------------------------------------------------------
-# Background backfill jobs (server-side, independent of the browser).
-# POST /backfill/{kind}/start returns a job_id immediately; the work runs
-# as an asyncio task in the backend process so a page refresh never stops
-# it.  GET /backfill/job/{job_id}/stream replays the log lines (SSE).
-# ----------------------------------------------------------------------
-import asyncio
-import asyncio as _asyncio
-
-_JOBS: dict[str, dict] = {}   # job_id -> {kind, status, lines[]}
-_job_counter = 0
 
 
 async def _run_job(job_id: str, kind: str) -> None:
     _JOBS[job_id]["status"] = "running"
-    gens = [_stream_cdp(), _stream_dcp()] if kind == "all" else ([_stream_cdp()] if kind == "cdp" else [_stream_dcp()])
-
-    async def _drain(label: str, gen) -> None:
-        try:
-            async for line in gen:
-                _JOBS[job_id]["lines"].append(line)
-            _JOBS[job_id]["lines"].append(f"{label} COMPLETE")
-        except Exception as exc:  # noqa: BLE001
-            _JOBS[job_id]["lines"].append(f"{label} ERROR: {exc}")
-
+    gen = _stream_all()
     try:
-        # Run all streams CONCURRENTLY (CDP + DCP at the same time) so the
-        # combined backfill isn't serial, and to avoid greenlet_spawn issues
-        # from chaining async generators in one task.
-        if kind == "all":
-            await asyncio.gather(
-                _drain("CDP backfill", gens[0]),
-                _drain("DCP backfill", gens[1]),
-            )
-        else:
-            await _drain("Backfill", gens[0])
+        async for line in gen:
+            _JOBS[job_id]["lines"].append(line)
         _JOBS[job_id]["status"] = "done"
     except Exception as exc:  # noqa: BLE001
         _JOBS[job_id]["lines"].append(f"ERROR: {exc}")
@@ -243,8 +179,8 @@ def _new_job(kind: str) -> str:
 
 @router.post("/{kind}/start", tags=["backfill"])
 async def start_backfill(kind: str) -> dict:
-    if kind not in ("cdp", "dcp", "all"):
-        return {"ok": False, "error": "kind must be cdp or dcp"}
+    if kind != "all":
+        return {"ok": False, "error": "kind must be all"}
     job_id = _new_job(kind)
     return {"ok": True, "job_id": job_id}
 

@@ -211,18 +211,7 @@ onUnmounted(() => {
               @click="runBackfill('all')"
             >Backfill All (CDP + DCP)</button>
           </div>
-          <div class="flex gap-2">
-            <button
-              class="rounded bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-              :disabled="!!backfilling"
-              @click="runBackfill('cdp')"
-            >Backfill CDP uptime</button>
-            <button
-              class="rounded bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-              :disabled="!!backfilling"
-              @click="runBackfill('dcp')"
-            >Backfill DCP Data</button>
-          </div>
+
           <div class="mt-4">
             <div class="mb-1 text-xs text-slate-400">Log</div>
             <pre class="h-72 overflow-auto rounded border border-runway-border bg-black/40 p-2 text-[10px] leading-relaxed text-emerald-300">{{ backfillLog || '— idle —' }}</pre>
