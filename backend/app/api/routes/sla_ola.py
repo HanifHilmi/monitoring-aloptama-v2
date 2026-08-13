@@ -142,12 +142,12 @@ async def _site_data_availability(db: AsyncSession, site: Site, start: datetime,
             observed = comp_counts.get(comp, 0)
             valid = observed
         expected = total_period_minutes
-        pct = (valid / expected * 100.0) if expected else 0.0
+        pct = min(100.0, (valid / expected * 100.0)) if expected else 0.0
         comp_rows.append({"component": comp, "uptime_pct": round(pct, 4), "samples": observed})
         overall_expected += expected
         overall_valid += valid
 
-    data_avail = (overall_valid / overall_expected * 100.0) if overall_expected else 0.0
+    data_avail = min(100.0, (overall_valid / overall_expected * 100.0)) if overall_expected else 0.0
     return {
         "site_id": site.id,
         "slug": site.slug,
@@ -182,13 +182,13 @@ async def get_summary(
     site_das = [await _site_data_availability(db, site, s, e) for site in sites]
 
     sla_pct = round(sum(c["uptime_pct"] for c in cdps) / len(cdps), 4) if cdps else 0.0
-    ola_pct = round(sum(d["data_availability_pct"] for d in site_das) / len(site_das), 4) if site_das else 0.0
+    ola_pct = round(min(100.0, sum(d["data_availability_pct"] for d in site_das) / len(site_das)), 4) if site_das else 0.0
     # Single 21-component overall: sum valid component-minutes over all sites
     # (each site has 7 components) divided by (21 x period minutes). Should
     # equal the per-site-avg when rows are complete.
     overall_valid = sum(d.get("overall_valid", 0.0) for d in site_das)
     overall_expected = sum(d.get("overall_expected", 0.0) for d in site_das)
-    ola_pct_21 = round((overall_valid / overall_expected * 100.0), 4) if overall_expected else 0.0
+    ola_pct_21 = round(min(100.0, (overall_valid / overall_expected * 100.0)), 4) if overall_expected else 0.0
 
     return {
         "generated_at": now,
@@ -257,8 +257,8 @@ async def get_history(
 
     rows = []
     for day, b in sorted(buckets.items()):
-        sla = (b["cdp_up"] / b["cdp_total"] * 100.0) if b["cdp_total"] else 0.0
-        ola = (b["sensor_valid"] / b["sensor_total"] * 100.0) if b["sensor_total"] else 0.0
+        sla = min(100.0, (b["cdp_up"] / b["cdp_total"] * 100.0)) if b["cdp_total"] else 0.0
+        ola = min(100.0, (b["sensor_valid"] / b["sensor_total"] * 100.0)) if b["sensor_total"] else 0.0
         rows.append({"day": day, "sla_pct": round(sla, 4), "ola_pct": round(ola, 4)})
 
     return {"span": span, "bucket": bucket, "start_date": s, "end_date": e, "rows": rows}
