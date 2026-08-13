@@ -16,6 +16,7 @@ const scope = ref(props.initialScope)
 const entityKey = ref('')
 const events = ref([])
 const loadingDaily = ref(false)
+const loadingSummary = ref(false)
 const loadingEvents = ref(false)
 
 const entityOptions = computed(() => {
@@ -86,9 +87,12 @@ const slaChartOption = computed(() => {
 })
 
 async function loadSummary() {
+  if (summary.value) loadingSummary.value = true
+  try {
   summary.value = await api.getSlaOlaSummary(range.value)
   if (!selected.value) return
   await Promise.all([loadDaily(), loadEvents()])
+  } finally { loadingSummary.value = false }
 }
 
 async function loadDaily() {
@@ -135,6 +139,7 @@ async function loadConnectivity() {
   }
 }
 
+watch(range, async () => { await loadSummary() })
 watch([scope, entityKey, range], async () => {
   if (!selected.value) return
   await Promise.all([loadDaily(), loadEvents()])
@@ -167,7 +172,8 @@ onMounted(loadSummary)
     </div>
 
     <!-- Summary cards -->
-    <div v-if="summary" class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+    <div v-if="summary" class="relative">
+      <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3" :class="{ 'opacity-40 pointer-events-none': loadingSummary }">
       <div v-for="row in summary.rows.filter((r) => r.scope === scope)" :key="row.entity_id" class="panel" :class="{ 'ring-1 ring-emerald-500/40': selected?.entity_id === row.entity_id }">
         <div class="flex items-center justify-between">
           <span class="text-sm font-semibold text-slate-200">{{ row.entity }}</span>
@@ -185,6 +191,13 @@ onMounted(loadSummary)
         >
           Analyze
         </button>
+        </div>
+      </div>
+      <div v-if="loadingSummary" class="absolute inset-0 z-10 flex items-center justify-center" style="background: rgba(11,18,32,0.55)">
+        <div class="flex items-center gap-2 rounded bg-runway-panel px-4 py-2 text-sm text-slate-200 shadow-lg">
+          <span class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-sky-400 border-t-transparent"></span>
+          Loading…
+        </div>
       </div>
     </div>
 
