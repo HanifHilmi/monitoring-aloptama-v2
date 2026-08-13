@@ -31,6 +31,9 @@ from app.models import AwosMetrics, CdpConnectivity, CdpNode, Sensor, Site
 
 router = APIRouter(prefix="/backfill", tags=["backfill"])
 logger = logging.getLogger(__name__)
+_JOBS: dict[str, dict] = {}
+_job_counter = 0
+
 
 
 def _sse(line: str) -> str:
