@@ -22,6 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 
 from app.core.config import settings
+from app.services.backfill import _group_wide_static, _wide_upsert
 from app.db.session import AsyncSessionLocal
 from app.ingestion.cdp_reader import CdpReader
 from app.ingestion.parsers import parse_one_minute_file, parse_timestamp_from_filename

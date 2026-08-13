@@ -95,7 +95,7 @@ export const api = {
     const start = await (await fetch('/api/v1/backfill/all/start', { method: 'POST' })).json()
     if (!start.ok) throw new Error(start.error || 'backfill start failed')
     if (onJobId) onJobId(start.job_id)
-    await this.resumeBackfill(start.job_id, onLine)
+    await api.resumeBackfill(start.job_id, onLine)
   },
   // Reconnect to an in-flight job: replays captured log lines then tails live.
   resumeBackfill: async (jobId, onLine) => {
