@@ -112,3 +112,21 @@ cd frontend && npm run build   # type/compile check
 
 ## License
 Proprietary internal tooling.
+
+## Persisting data across Coolify redeploys
+
+Backfill-on-boot is **disabled** (ENABLE_BACKFILL_ON_BOOT=false). Data lives in
+the Postgres volume `db-data`; to keep it across redeploys in Coolify:
+
+1. In the Coolify Postgres(DB) service's **Storage / Volumes** settings, attach
+   a persistent volume named exactly **`db-data`** (or update `docker-compose.yml`
+   `volumes: [db-data:/var/lib/postgresql/data]` to your Coolify volume name).
+2. Do NOT set `RESET_DB_ON_BOOT=true` (it is `false` by default) — that would
+   DROP the schema and wipe the data.
+
+With the volume attached, redeploying the containers preserves the database,
+so you only run Backfill All once (not on every deploy).
+
+**Note:** if Coolify recreates the volume (fresh/empty), the DB starts empty —
+that is expected; attach the persistent volume so it is reused.
+
