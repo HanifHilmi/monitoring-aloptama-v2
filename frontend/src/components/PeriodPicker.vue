@@ -135,16 +135,14 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMouseDown))
   <div ref="root" class="relative flex flex-wrap items-center gap-1.5 rounded border border-runway-border bg-runway-panel p-1.5 text-xs">
     <button class="rounded px-2 py-1 text-sky-300 hover:bg-runway-dark" @click="pickCurrent">Current</button>
 
-    <!-- Category chips -->
-    <button
-      v-for="c in CATEGORIES"
-      :key="c.key"
-      class="rounded px-2 py-1 transition-colors"
-      :class="category === c.key ? 'bg-sky-600 text-white' : 'text-slate-300 hover:bg-runway-dark'"
-      @click="pickCategory(c.key)"
+    <!-- Category dropdown (replaces the Weekly/Monthly/Quarterly/Yearly toggle) -->
+    <select
+      v-model="category"
+      class="rounded border border-runway-border bg-runway-dark px-2 py-1 text-slate-200 focus:outline-none"
+      @change="pickCategory(category)"
     >
-      {{ c.label }}
-    </button>
+      <option v-for="c in CATEGORIES" :key="c.key" :value="c.key">{{ c.label }}</option>
+    </select>
 
     <!-- Year popover (same design as month/quarter; shares single-open) -->
     <div v-if="category !== 'weekly'" class="relative">
