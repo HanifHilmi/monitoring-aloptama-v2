@@ -138,7 +138,9 @@ async def reset_database(session: AsyncSession) -> None:
 
 
 async def is_database_initialized(session: AsyncSession) -> bool:
-    """True when telemetry/connectivity data already exists (skip backfill)."""
-    from app.services.backfill import is_database_uninitialized
+    if not await _table_exists(session, "awos_metrics"):
+        return False
+    cnt = (await session.execute(select(func.count(AwosMetrics.time)))).scalar_one()
+    return cnt > 0
 
     return not await is_database_uninitialized(session)

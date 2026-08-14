@@ -51,40 +51,6 @@ def _parse_backfill_start(value: str) -> datetime:
     return datetime.fromisoformat(value).astimezone(timezone.utc)
 
 
-async def is_database_uninitialized(session: AsyncSession) -> bool:
-    """True when no telemetry exists.
-
-    Live CDP connectivity probes run continuously, so cdp_connectivity rows
-    appear even on a fresh database. Telemetry is the true signal for whether
-    the historical backfill has populated sensor data.
-    """
-    tel = (await session.execute(select(func.count(AwosMetrics.time)))).scalar_one()
-    return tel == 0
-
-
-async def run_initial_backfill_if_needed(
-    session: AsyncSession,
-    *,
-    force: bool = False,
-) -> bool:
-    """Run the historical backfill when the database is empty (or forced)."""
-    if not force and not await is_database_uninitialized(session):
-        logger.info("Database already initialized — skipping backfill")
-        return False
-
-    start = _parse_backfill_start(settings.backfill_start)
-    end = datetime.now(timezone.utc)
-    if start >= end:
-        logger.warning("Backfill start is in the future — nothing to do")
-        return False
-
-    logger.info("Starting historical backfill %s -> %s", start, end)
-    await _run_backfill(session, start, end)
-
-    await rebuild_daily_rollups(session, start.date(), end.date())
-    logger.info("Backfill complete")
-    return True
-
 
 async def _run_backfill(
     session: AsyncSession,

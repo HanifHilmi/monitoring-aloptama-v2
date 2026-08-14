@@ -32,11 +32,11 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
     try:
-        # 0) Development reset (DEV ONLY). The schema is dropped ONLY when
-        #    BOTH reset_db_on_boot is true AND ENVIRONMENT == 'dev'. This
-        #    makes it impossible for a stray/injected RESET_DB_ON_BOOT=true
-        #    (e.g. Coolify app env) to wipe the database in production.
-        if settings.reset_db_on_boot and (settings.environment or '').lower() == 'dev':
+        # 0) Development reset (DEV ONLY). ENVIRONMENT is the single toggle:
+        #    when it is 'dev', the schema is dropped (fresh empty DB). In any
+        #    other environment (prod by default) reset is NEVER performed, so
+        #    production data can't be wiped.
+        if (settings.environment or '').lower() == 'dev':
             async with AsyncSessionLocal() as session:
                 await reset_database(session)
                 # Dispose pooled connections that had timescaledb pre-loaded —
@@ -46,9 +46,9 @@ async def lifespan(app: FastAPI):
                 await engine.dispose()
                 logger.info("DB reset on boot: schema dropped + recreated")
 
-        # 1) Apply pending migrations (idempotent)
-        if settings.enable_migrations_on_boot:
-            async with AsyncSessionLocal() as session:
+        # 1) Apply pending migrations (idempotent, always on for all envs).
+        #    Migrations are IF NOT EXISTS, so they never wipe data.
+        async with AsyncSessionLocal() as session:
                 applied = await run_migrations(session)
                 if applied:
                     logger.info("Applied migrations: %s", ", ".join(applied))

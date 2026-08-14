@@ -29,7 +29,6 @@ class Settings(BaseSettings):
     db_pool_pre_ping: bool = True
     # While in development: drop the public schema + re-run all migrations
     # on every deploy so the database is clean.
-    reset_db_on_boot: bool = False
 
     # ---- CDP network nodes ----
     cdp1_ip: str = "172.22.39.162"
@@ -47,8 +46,6 @@ class Settings(BaseSettings):
     backfill_batch_days: int = 1
     # Backfill is triggered manually from the dashboard Settings -> Backfill
     # (CDP uptime and DCP data). We do NOT backfill automatically on boot.
-    enable_backfill_on_boot: bool = False
-    enable_migrations_on_boot: bool = True
     telemetry_stale_after_minutes: int = 5
 
     # ---- SLA/OLA rollup ----

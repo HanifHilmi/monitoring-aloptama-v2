@@ -108,8 +108,7 @@ async def system_health(
                 "ip": settings.cdp2_ip,
                 "mount_path": settings.cdp2_mount_path,
             },
-            "backfill_enabled": settings.enable_backfill_on_boot,
-            "backfill_start": settings.backfill_start,
+                "backfill_start": settings.backfill_start,
         },
     }
 
