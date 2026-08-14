@@ -24,22 +24,6 @@ const fastTimer = ref(null)
 const error = ref(null)
 const loadingSla = ref(false)
 const loadingCdp = ref(false)
-// ---- Live SLA/OLA (only when the historical summary is unavailable) ----
-const liveSla = computed(() => {
-  const nodes = live.value?.cdp_nodes || []
-  if (!nodes.length) return null
-  const vals = nodes.map((n) => (n.status === 'online' ? 100 : 0))
-  return vals.reduce((a, b) => a + b, 0) / vals.length
-})
-
-const liveOla = computed(() => {
-  const sites = live.value?.sites || []
-  if (!sites.length) return null
-  const vals = sites.map((s) =>
-    s.total_sensors ? (s.online_sensors / s.total_sensors) * 100 : 0,
-  )
-  return vals.reduce((a, b) => a + b, 0) / vals.length
-})
 
 // SLA/OLA come EXCLUSIVELY from the backend /sla-ola/summary which computes
 // UP-minutes / period-minutes (missing minute = DOWN). No live fallback:
@@ -105,8 +89,6 @@ const historyOption = computed(() => {
 function onSlaPeriod() { loadingSla.value = true; loadSummary() }
 function onCdpPeriod() { loadingCdp.value = true; loadSummary() }  // cdpPeriod drives CDP cards + Sites
 
-function showSlaLoading() { loadingSla.value = true }
-
 async function loadSummary() {
   try {
     const [lv, so, h] = await Promise.all([
@@ -147,6 +129,10 @@ async function loadSummaryFast() {
 }
 
 onMounted(() => {
+  // Show loading fades + placeholders during the FIRST load too, so the
+  // page never looks "empty/broken" while the summaries resolve.
+  loadingSla.value = true
+  loadingCdp.value = true
   loadAll()
   timer.value = setInterval(loadAll, 30_000)
   fastTimer.value = setInterval(loadSummaryFast, 10_000)
@@ -164,10 +150,14 @@ onUnmounted(() => {
     <!-- SLA & OLA percentages (own period picker) -->
     <section>
       <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">SLA / OLA</h2>
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">
+          SLA / OLA
+          <span v-if="loadingSla" class="ml-2 inline-flex items-center gap-1 text-[11px] font-normal text-sky-400">
+            <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-sky-400 border-t-transparent"></span>Loading…
+          </span>
+        </h2>
         <PeriodPicker v-model="slaPeriod" @update:model-value="onSlaPeriod" />
       </div>
-      <div class="relative">
       <div class="grid gap-4 md:grid-cols-2" :class="{ 'opacity-40 pointer-events-none': loadingSla }">
         <div class="panel">
           <div class="flex items-center justify-between">
@@ -188,17 +178,9 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
-      <!-- ECharts-style loading overlay while fetching SLA/OLA for the period -->
-      <div v-if="loadingSla" class="absolute inset-0 z-10 flex items-center justify-center" style="background: rgba(11,18,32,0.55)">
-        <div class="flex items-center gap-2 rounded bg-runway-panel px-4 py-2 text-sm text-slate-200 shadow-lg">
-          <span class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-sky-400 border-t-transparent"></span>
-          Loading…
-        </div>
-      </div>
-      </div>
     </section>
 
-    <!-- CDP Uptime cards + uptime history (own period picker) -->
+    <!-- CDP Uptime cards (own period picker) -->
     <section>
       <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">
@@ -209,7 +191,7 @@ onUnmounted(() => {
         </h2>
         <PeriodPicker v-model="cdpPeriod" @update:model-value="onCdpPeriod" />
       </div>
-      <div class="grid gap-4 md:grid-cols-2">
+      <div class="grid gap-4 md:grid-cols-2" :class="{ 'opacity-40 pointer-events-none': loadingCdp }">
         <div v-for="c in cdps" :key="c.cdp_id ?? c.id" class="panel">
           <div class="flex items-center justify-between">
             <span class="flex items-center gap-2">
@@ -235,13 +217,16 @@ onUnmounted(() => {
             </div>
           </div>
         </div>
-        <div v-if="!cdps.length" class="panel text-center text-sm text-slate-500">No CDP nodes configured</div>
+        <!-- Greyed placeholders while the CDP summary is still loading -->
+        <div v-if="!cdps.length && loadingCdp" v-for="n in 2" :key="'cdp'+n" class="panel animate-pulse">
+          <div class="h-3 w-1/3 rounded bg-runway-dark"></div>
+          <div class="mt-3 h-8 w-1/2 rounded bg-runway-dark"></div>
+        </div>
+        <div v-if="!cdps.length && !loadingCdp" class="panel text-center text-sm text-slate-500">No CDP nodes configured</div>
       </div>
-
-
     </section>
 
-    <!-- Sites (Data Availability, live sensor health) -->
+    <!-- Sites (Data Availability) -->
     <section>
       <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">
@@ -251,7 +236,7 @@ onUnmounted(() => {
           </span>
         </h2>
       </div>
-      <div class="grid gap-4 md:grid-cols-3">
+      <div class="grid gap-4 md:grid-cols-3" :class="{ 'opacity-40 pointer-events-none': loadingCdp }">
         <RouterLink v-for="s in sites" :key="s.site_id ?? s.slug" :to="`/runway/${s.slug}`" class="panel transition-colors hover:border-emerald-500/50">
           <div class="flex items-center justify-between">
             <span class="font-semibold text-slate-200">{{ s.name }}</span>
@@ -266,7 +251,15 @@ onUnmounted(() => {
             </span>
           </div>
         </RouterLink>
-        <div v-if="!sites.length" class="panel text-center text-sm text-slate-500">No sites configured</div>
+        <!-- Greyed placeholders while the CDP summary is still loading -->
+        <div v-if="!sites.length && loadingCdp" v-for="n in 3" :key="'site'+n" class="panel animate-pulse">
+          <div class="h-3 w-2/3 rounded bg-runway-dark"></div>
+          <div class="mt-3 h-6 w-1/2 rounded bg-runway-dark"></div>
+          <div class="mt-3 flex gap-1">
+            <span class="h-2 w-8 rounded bg-runway-dark"></span><span class="h-2 w-8 rounded bg-runway-dark"></span>
+          </div>
+        </div>
+        <div v-if="!sites.length && !loadingCdp" class="panel text-center text-sm text-slate-500">No sites configured</div>
       </div>
     </section>
 
