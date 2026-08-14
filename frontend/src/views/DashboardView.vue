@@ -22,6 +22,7 @@ const history = ref([])
 const timer = ref(null)
 const fastTimer = ref(null)
 const error = ref(null)
+const loadingSla = ref(false)
 // ---- Live SLA/OLA (only when the historical summary is unavailable) ----
 const liveSla = computed(() => {
   const nodes = live.value?.cdp_nodes || []
@@ -100,8 +101,10 @@ const historyOption = computed(() => {
   }
 })
 
-function onSlaPeriod() { loadSummary() }
-function onCdpPeriod() { loadSummary() }  // re-fetch both summaries (cdpPeriod drives CDP cards)
+function onSlaPeriod() { showSlaLoading(); loadSummary() }
+function onCdpPeriod() { showSlaLoading(); loadSummary() }  // re-fetch both summaries (cdpPeriod drives CDP cards)
+
+function showSlaLoading() { loadingSla.value = true }
 
 async function loadSummary() {
   try {
@@ -118,6 +121,8 @@ async function loadSummary() {
     error.value = null
   } catch (e) {
     error.value = e.message
+  } finally {
+    loadingSla.value = false
   }
 }
 
@@ -160,7 +165,8 @@ onUnmounted(() => {
         <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">SLA / OLA</h2>
         <PeriodPicker v-model="slaPeriod" @update:model-value="onSlaPeriod" />
       </div>
-      <div class="grid gap-4 md:grid-cols-2">
+      <div class="relative">
+      <div class="grid gap-4 md:grid-cols-2" :class="{ 'opacity-40 pointer-events-none': loadingSla }">
         <div class="panel">
           <div class="flex items-center justify-between">
             <span class="text-xs uppercase tracking-wide text-slate-400">SLA</span>
@@ -179,6 +185,14 @@ onUnmounted(() => {
             {{ olaPct === null || olaPct === undefined ? '—' : olaPct.toFixed(2) + '%' }}
           </div>
         </div>
+      </div>
+      <!-- ECharts-style loading overlay while fetching SLA/OLA for the period -->
+      <div v-if="loadingSla" class="absolute inset-0 z-10 flex items-center justify-center" style="background: rgba(11,18,32,0.55)">
+        <div class="flex items-center gap-2 rounded bg-runway-panel px-4 py-2 text-sm text-slate-200 shadow-lg">
+          <span class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-sky-400 border-t-transparent"></span>
+          Loading…
+        </div>
+      </div>
       </div>
     </section>
 
