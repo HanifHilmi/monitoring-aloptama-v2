@@ -111,7 +111,7 @@ function pickCurrent() {
   else broadcast(currentPeriod(category.value))
 }
 
-function togglePop(k) { openFor.value = openFor.value === k ? null : k }
+function togglePop(k) { if (props.disabled) return; openFor.value = openFor.value === k ? null : k }
 
 function navMonth(delta) {
   let m = monthIdx.value + delta
@@ -150,7 +150,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMouseDown))
 
     <!-- Year popover (same design as month/quarter; shares single-open) -->
     <div v-if="category !== 'weekly'" class="relative">
-      <button class="rounded bg-runway-dark px-2 py-1 text-slate-200" @click="togglePop('year')">
+      <button class="rounded bg-runway-dark px-2 py-1 text-slate-200 disabled:cursor-not-allowed disabled:opacity-40" :disabled="props.disabled" @click="togglePop('year')">
         {{ year }} ▾
       </button>
       <div v-if="openFor === 'year'"
@@ -177,7 +177,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMouseDown))
 
     <!-- Monthly popover -->
     <div v-if="category === 'monthly'" class="relative">
-      <button class="rounded bg-runway-dark px-2 py-1 text-slate-200" @click="togglePop('monthly')">
+      <button class="rounded bg-runway-dark px-2 py-1 text-slate-200 disabled:cursor-not-allowed disabled:opacity-40" :disabled="props.disabled" @click="togglePop('monthly')">
         {{ MONTHS[monthIdx].slice(0, 3) }} ▾
       </button>
       <div v-if="openFor === 'monthly'"
@@ -204,7 +204,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMouseDown))
 
     <!-- Quarterly popover -->
     <div v-else-if="category === 'quarterly'" class="relative">
-      <button class="rounded bg-runway-dark px-2 py-1 text-slate-200" @click="togglePop('quarterly')">
+      <button class="rounded bg-runway-dark px-2 py-1 text-slate-200 disabled:cursor-not-allowed disabled:opacity-40" :disabled="props.disabled" @click="togglePop('quarterly')">
         {{ QUARTERS[quarterIdx] }} ▾
       </button>
       <div v-if="openFor === 'quarterly'"
@@ -231,7 +231,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMouseDown))
 
     <!-- Weekly calendar popover -->
     <div v-else-if="category === 'weekly'" class="relative">
-      <button class="rounded bg-runway-dark px-2 py-1 text-slate-200" @click="togglePop('weekly')">
+      <button class="rounded bg-runway-dark px-2 py-1 text-slate-200 disabled:cursor-not-allowed disabled:opacity-40" :disabled="props.disabled" @click="togglePop('weekly')">
         {{ weekLabel }} ▾
       </button>
       <div v-if="openFor === 'weekly'"
