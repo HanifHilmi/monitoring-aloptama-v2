@@ -200,7 +200,12 @@ onUnmounted(() => {
     <section>
       <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">CDP Uptime</h2>
-        <PeriodPicker v-model="cdpPeriod" @update:model-value="onCdpPeriod" />
+        <div class="flex items-center gap-2">
+          <span v-if="loadingSla" class="inline-flex items-center gap-1 text-[11px] text-sky-400">
+            <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-sky-400 border-t-transparent"></span>Loading…
+          </span>
+          <PeriodPicker v-model="cdpPeriod" @update:model-value="onCdpPeriod" />
+        </div>
       </div>
       <div class="grid gap-4 md:grid-cols-2">
         <div v-for="c in cdps" :key="c.cdp_id ?? c.id" class="panel">
@@ -236,7 +241,12 @@ onUnmounted(() => {
 
     <!-- Sites (Data Availability, live sensor health) -->
     <section>
-      <h2 class="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-400">Sites — Data Availability</h2>
+      <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">Sites — Data Availability</h2>
+        <span v-if="loadingSla" class="inline-flex items-center gap-1 text-[11px] text-sky-400">
+          <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-sky-400 border-t-transparent"></span>Loading…
+        </span>
+      </div>
       <div class="grid gap-4 md:grid-cols-3">
         <RouterLink v-for="s in sites" :key="s.site_id ?? s.slug" :to="`/runway/${s.slug}`" class="panel transition-colors hover:border-emerald-500/50">
           <div class="flex items-center justify-between">
