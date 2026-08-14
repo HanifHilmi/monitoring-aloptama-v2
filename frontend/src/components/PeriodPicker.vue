@@ -19,6 +19,9 @@ const monthIdx = ref(new Date().getUTCMonth())
 const day = ref(1)
 const quarterIdx = ref(Math.floor(new Date().getUTCMonth() / 3))
 const openFor = ref(null) // 'weekly' | 'monthly' | 'quarterly' | null
+// Weekly range selection: user picks start, then end (max 7 days), then Pick.
+const selStart = ref(null)
+const selEnd = ref(null)
 const YEAR_MIN = 2026 // AWOS did not exist in 2025
 const YEAR_MAX = 2099
 
@@ -36,9 +39,15 @@ const days = computed(() => daysInMonth(year.value, monthIdx.value))
 const weekdays = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 const leadingBlanks = computed(() => new Date(Date.UTC(year.value, monthIdx.value, 1)).getUTCDay())
 const weekLabel = computed(() => {
+  if (selStart.value && selEnd.value) {
+    const a = selStart.value
+    const b = selEnd.value
+    const fmt = (d) => `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()].slice(0, 3)}`
+    return `${fmt(a)} – ${fmt(b)} ${b.getUTCFullYear()}`
+  }
   const e = new Date(weekWindow(year.value, monthIdx.value, day.value).end)
   const s = new Date(weekWindow(year.value, monthIdx.value, day.value).start)
-  const fmt = (d) => `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()].slice(0,3)}`
+  const fmt = (d) => `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()].slice(0, 3)}`
   return `${fmt(s)} – ${fmt(e)} ${e.getUTCFullYear()}`
 })
 const yearPageStart = ref(YEAR_MIN)  // first year of the visible 8-year page
@@ -84,6 +93,16 @@ function monthSoFar(y, m) {
 
 function broadcast(win) { emit('update:modelValue', { ...win }) }
 
+function weekWindowFrom(a, b) {
+  const fmt = (d) => `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()].slice(0, 3)}`
+  return {
+    key: 'weekly',
+    label: `${fmt(a)} – ${fmt(b)} ${b.getUTCFullYear()}`,
+    start: new Date(Date.UTC(a.getUTCFullYear(), a.getUTCMonth(), a.getUTCDate())).toISOString(),
+    end: new Date(Date.UTC(b.getUTCFullYear(), b.getUTCMonth(), b.getUTCDate())).toISOString(),
+  }
+}
+
 function apply() {
   if (category.value === 'yearly') {
     broadcast(year.value === nowYear ? yearSoFar(nowYear) : yearWindow(year.value))
@@ -92,9 +111,9 @@ function apply() {
   } else if (category.value === 'quarterly') {
     const curQ = Math.floor(nowMonth / 3)
     broadcast(year.value === nowYear && quarterIdx.value === curQ ? quarterSoFar(nowYear, curQ) : quarterWindow(year.value, quarterIdx.value))
-  } else {
-    broadcast(weekWindow(year.value, monthIdx.value, day.value))
   }
+  // NOTE: weekly is applied via pickWeek() (dedicated Pick button) so nav
+  // and day clicks never load data.
 }
 
 function pickCategory(k) { category.value = k; openFor.value = null; apply() }
@@ -113,11 +132,56 @@ function pickCurrent() {
 
 function togglePop(k) { if (props.disabled) return; openFor.value = openFor.value === k ? null : k }
 
+// Weekly range selection
+function pickDay(d) {
+  if (props.disabled) return
+  const date = new Date(Date.UTC(year.value, monthIdx.value, d))
+  if (!selStart.value || selEnd.value) {
+    selStart.value = date
+    selEnd.value = null
+  } else {
+    let s = selStart.value
+    let e = date
+    if (e < s) { const t = s; s = e; e = t }
+    // clamp to a max of 7 days
+    const maxE = new Date(s); maxE.setUTCDate(s.getUTCDate() + 6)
+    if (e > maxE) e = maxE
+    const minS = new Date(e); minS.setUTCDate(e.getUTCDate() - 6)
+    if (s < minS) s = minS
+    selStart.value = s
+    selEnd.value = e
+  }
+  // keep the visible month at the clicked day
+  year.value = date.getUTCFullYear()
+  monthIdx.value = date.getUTCMonth()
+  day.value = date.getUTCDate()
+}
+
+function isInSel(d) {
+  if (!selStart.value) return false
+  const ts = Date.UTC(year.value, monthIdx.value, d)
+  const s = selStart.value
+  const e = selEnd.value || s
+  const sTs = Date.UTC(s.getUTCFullYear(), s.getUTCMonth(), s.getUTCDate())
+  const eTs = Date.UTC(e.getUTCFullYear(), e.getUTCMonth(), e.getUTCDate())
+  return ts >= Math.min(sTs, eTs) && ts <= Math.max(sTs, eTs)
+}
+
+function pickWeek() {
+  if (props.disabled) return
+  // Default to the current (highlighted) single day if nothing picked.
+  const s = selStart.value || new Date(Date.UTC(year.value, monthIdx.value, day.value))
+  const e = selEnd.value || s
+  broadcast(weekWindowFrom(s, e))
+  openFor.value = null
+}
+
 function navMonth(delta) {
+  // Only changes the visible month - NEVER loads data.
   let m = monthIdx.value + delta
   let y = year.value
   if (m < 0) { m = 11; y-- } else if (m > 11) { m = 0; y++ }
-  if (y >= YEAR_MIN && y <= YEAR_MAX) { monthIdx.value = m; year.value = y; apply() }
+  if (y >= YEAR_MIN && y <= YEAR_MAX) { monthIdx.value = m; year.value = y }
 }
 
 function isMonthAvailable(y, m) { return y < nowYear || (y === nowYear && m <= nowMonth) }
@@ -229,7 +293,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMouseDown))
       </div>
     </div>
 
-    <!-- Weekly calendar popover -->
+    <!-- Weekly range picker -->
     <div v-else-if="category === 'weekly'" class="relative">
       <button class="rounded bg-runway-dark px-2 py-1 text-slate-200 disabled:cursor-not-allowed disabled:opacity-40" :disabled="props.disabled" @click="togglePop('weekly')">
         {{ weekLabel }} ▾
@@ -251,11 +315,19 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMouseDown))
             :key="d"
             class="h-6 w-6 rounded text-[10px] transition-colors"
             :disabled="isDayDisabled(d)"
-            :class="day === d ? 'bg-sky-600 text-white' : isDayDisabled(d) ? 'text-slate-700 cursor-not-allowed' : 'text-slate-300 hover:bg-runway-dark'"
-            @click="day = d; apply(); openFor = null"
+            :class="isInSel(d) ? 'bg-sky-600 text-white' : isDayDisabled(d) ? 'text-slate-700 cursor-not-allowed' : 'text-slate-300 hover:bg-runway-dark'"
+            @click="pickDay(d)"
           >
             {{ d }}
           </button>
+        </div>
+        <div class="mt-2 flex items-center justify-between gap-2 border-t border-runway-border pt-1.5">
+          <span class="text-[10px] text-slate-500">Select start → end (max 7 days)</span>
+          <button
+            class="rounded bg-sky-600 px-2 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+            :disabled="!selStart"
+            @click="pickWeek"
+          >Pick</button>
         </div>
       </div>
     </div>
