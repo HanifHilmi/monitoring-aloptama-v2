@@ -156,7 +156,7 @@ onUnmounted(() => {
             <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-sky-400 border-t-transparent"></span>Loading…
           </span>
         </h2>
-        <PeriodPicker v-model="slaPeriod" @update:model-value="onSlaPeriod" />
+        <PeriodPicker v-model="slaPeriod" :disabled="loadingSla" @update:model-value="onSlaPeriod" />
       </div>
       <div class="grid gap-4 md:grid-cols-2" :class="{ 'opacity-40 pointer-events-none': loadingSla }">
         <div class="panel">
@@ -189,7 +189,7 @@ onUnmounted(() => {
             <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-sky-400 border-t-transparent"></span>Loading…
           </span>
         </h2>
-        <PeriodPicker v-model="cdpPeriod" @update:model-value="onCdpPeriod" />
+        <PeriodPicker v-model="cdpPeriod" :disabled="loadingCdp" @update:model-value="onCdpPeriod" />
       </div>
       <div class="grid gap-4 md:grid-cols-2" :class="{ 'opacity-40 pointer-events-none': loadingCdp }">
         <div v-for="c in cdps" :key="c.cdp_id ?? c.id" class="panel">

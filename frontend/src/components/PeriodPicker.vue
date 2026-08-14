@@ -6,7 +6,10 @@ import {
   currentPeriod, daysInMonth,
 } from '@/utils/period'
 
-const props = defineProps({ modelValue: { type: Object, required: true } })
+const props = defineProps({
+  modelValue: { type: Object, required: true },
+  disabled: { type: Boolean, default: false },
+})
 const emit = defineEmits(['update:modelValue'])
 
 const root = ref(null)
@@ -133,12 +136,13 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMouseDown))
 
 <template>
   <div ref="root" class="relative flex flex-wrap items-center gap-1.5 rounded border border-runway-border bg-runway-panel p-1.5 text-xs">
-    <button class="rounded px-2 py-1 text-sky-300 hover:bg-runway-dark" @click="pickCurrent">Current</button>
+    <button class="rounded px-2 py-1 text-sky-300 hover:bg-runway-dark disabled:cursor-not-allowed disabled:opacity-40" :disabled="props.disabled" @click="pickCurrent">Current</button>
 
     <!-- Category dropdown (replaces the Weekly/Monthly/Quarterly/Yearly toggle) -->
     <select
       v-model="category"
-      class="rounded border border-runway-border bg-runway-dark px-2 py-1 text-slate-200 focus:outline-none"
+      class="rounded border border-runway-border bg-runway-dark px-2 py-1 text-slate-200 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+      :disabled="props.disabled"
       @change="pickCategory(category)"
     >
       <option v-for="c in CATEGORIES" :key="c.key" :value="c.key">{{ c.label }}</option>
