@@ -32,8 +32,11 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
     try:
-        # 0) Development reset: fresh empty DB each deploy.
-        if settings.reset_db_on_boot:
+        # 0) Development reset (DEV ONLY). The schema is dropped ONLY when
+        #    BOTH reset_db_on_boot is true AND ENVIRONMENT == 'dev'. This
+        #    makes it impossible for a stray/injected RESET_DB_ON_BOOT=true
+        #    (e.g. Coolify app env) to wipe the database in production.
+        if settings.reset_db_on_boot and (settings.environment or '').lower() == 'dev':
             async with AsyncSessionLocal() as session:
                 await reset_database(session)
                 # Dispose pooled connections that had timescaledb pre-loaded —
