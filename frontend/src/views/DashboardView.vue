@@ -23,6 +23,7 @@ const timer = ref(null)
 const fastTimer = ref(null)
 const error = ref(null)
 const loadingSla = ref(false)
+const loadingCdp = ref(false)
 // ---- Live SLA/OLA (only when the historical summary is unavailable) ----
 const liveSla = computed(() => {
   const nodes = live.value?.cdp_nodes || []
@@ -101,8 +102,8 @@ const historyOption = computed(() => {
   }
 })
 
-function onSlaPeriod() { showSlaLoading(); loadSummary() }
-function onCdpPeriod() { showSlaLoading(); loadSummary() }  // re-fetch both summaries (cdpPeriod drives CDP cards)
+function onSlaPeriod() { loadingSla.value = true; loadSummary() }
+function onCdpPeriod() { loadingCdp.value = true; loadSummary() }  // cdpPeriod drives CDP cards + Sites
 
 function showSlaLoading() { loadingSla.value = true }
 
@@ -123,6 +124,7 @@ async function loadSummary() {
     error.value = e.message
   } finally {
     loadingSla.value = false
+    loadingCdp.value = false
   }
 }
 
@@ -199,13 +201,13 @@ onUnmounted(() => {
     <!-- CDP Uptime cards + uptime history (own period picker) -->
     <section>
       <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">CDP Uptime</h2>
-        <div class="flex items-center gap-2">
-          <span v-if="loadingSla" class="inline-flex items-center gap-1 text-[11px] text-sky-400">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">
+          CDP Uptime
+          <span v-if="loadingCdp" class="ml-2 inline-flex items-center gap-1 text-[11px] font-normal text-sky-400">
             <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-sky-400 border-t-transparent"></span>Loading…
           </span>
-          <PeriodPicker v-model="cdpPeriod" @update:model-value="onCdpPeriod" />
-        </div>
+        </h2>
+        <PeriodPicker v-model="cdpPeriod" @update:model-value="onCdpPeriod" />
       </div>
       <div class="grid gap-4 md:grid-cols-2">
         <div v-for="c in cdps" :key="c.cdp_id ?? c.id" class="panel">
@@ -242,10 +244,12 @@ onUnmounted(() => {
     <!-- Sites (Data Availability, live sensor health) -->
     <section>
       <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">Sites — Data Availability</h2>
-        <span v-if="loadingSla" class="inline-flex items-center gap-1 text-[11px] text-sky-400">
-          <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-sky-400 border-t-transparent"></span>Loading…
-        </span>
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">
+          Sites — Data Availability
+          <span v-if="loadingCdp" class="ml-2 inline-flex items-center gap-1 text-[11px] font-normal text-sky-400">
+            <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-sky-400 border-t-transparent"></span>Loading…
+          </span>
+        </h2>
       </div>
       <div class="grid gap-4 md:grid-cols-3">
         <RouterLink v-for="s in sites" :key="s.site_id ?? s.slug" :to="`/runway/${s.slug}`" class="panel transition-colors hover:border-emerald-500/50">
