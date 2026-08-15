@@ -195,13 +195,37 @@ const stringCharts = computed(() => {
       })
       height = '104px'
     } else {
-      const bars = Math.min(counts.length, 8) + (counts.length > 8 ? 1 : 0)
-      option = buildStringHistogramOption({ counts, name: m })
+      // Present Weather: when exactly ONE code occurred in the window, fold
+      // the clear minutes into an 'NSW' (No Significant Weather) bar so the
+      // chart reads "mostly clear + one event". With >=2 codes NSW would
+      // dominate, so it is omitted. DB data is left untouched.
+      let effectiveCounts = counts
+      if (WIDE_COL[m] === 'present_weather' && counts.length === 1) {
+        const totalMin = Math.max(
+          0,
+          Math.round((new Date(win.end || Date.now()) - new Date(win.start || 0)) / 60000),
+        )
+        const nsw = Math.max(0, totalMin - counts.reduce((s, x) => s + x.count, 0))
+        if (nsw > 0) effectiveCounts = [...counts, { value: 'NSW', count: nsw }]
+      }
+      const bars = Math.min(effectiveCounts.length, 8) + (effectiveCounts.length > 8 ? 1 : 0)
+      option = buildStringHistogramOption({ counts: effectiveCounts, name: m })
       height = `${48 + bars * 18}px`
     }
     out.push({ alias: m, option, height })
   }
   return out
+})
+
+// A string-only sensor (e.g. Lightning) with no data in the window would
+// otherwise render a blank card — give the operator a clear message instead.
+const noDataNote = computed(() => {
+  if (numericMetrics.value.length || stringCharts.value.length) return null
+  if (!stringMetrics.value.length) return null
+  if (props.sensor.code === 'LIGH') return 'No lightning activity recorded in this period.'
+  if (props.sensor.code === 'PWX') return 'No significant weather in this period.'
+  if (props.sensor.code === 'CEL') return 'No cloud data recorded in this period.'
+  return 'No data recorded in this period.'
 })
 
 // Wind gust stats for ANEM (WGS max + its direction in range).
@@ -293,7 +317,8 @@ onBeforeUnmount(() => clearInterval(pollTimer))
           <EChart :option="sc.option" :height="sc.height" />
         </div>
 
-        <div v-if="!numericMetrics.length && !stringMetrics.length && !isState" class="py-10 text-center text-xs text-slate-500">No chart configured</div>
+        <div v-if="noDataNote" class="py-10 text-center text-xs text-slate-500">{{ noDataNote }}</div>
+        <div v-else-if="!numericMetrics.length && !stringMetrics.length && !isState" class="py-10 text-center text-xs text-slate-500">No chart configured</div>
       </template>
     </div>
   </div>
