@@ -107,6 +107,18 @@ async def _compute_wind(db: AsyncSession, slug: str, s_dt: datetime, e_dt: datet
         )
     ).one()
 
+    gust = (
+        await db.execute(
+            text(
+                "SELECT COUNT(*) FILTER (WHERE gust_speed_kt > 0) AS cnt, "
+                "MAX(gust_speed_kt) AS mx FROM awos_metrics "
+                "WHERE site_id = :slug AND time >= :s AND time <= :e "
+                "AND gust_speed_kt IS NOT NULL"
+            ),
+            {"slug": slug, "s": s_dt, "e": e_dt},
+        )
+    ).one()
+
     gust_cnt = gust.cnt or 0
     gust_max = None
     gust_dir = None
