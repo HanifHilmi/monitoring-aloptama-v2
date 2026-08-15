@@ -2,7 +2,7 @@
 import { api } from '@/api/client'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import EChart from '@/components/EChart.vue'
-import { buildDualAxisOption } from '@/utils/chart'
+import { buildStringStateOption, buildStringHistogramOption } from '@/utils/chart'
 
 const props = defineProps({
   sensor: { type: Object, required: true },
@@ -11,7 +11,8 @@ const props = defineProps({
   win: { type: Object, default: null },
 })
 
-const metrics = ref({})   // metric -> points[]
+const metrics = ref({})    // numeric: alias -> [{time, value}]
+const textData = ref({})   // string: alias -> { transitions, counts }
 const loading = ref(false)
 const error = ref(null)
 const refreshTick = ref(0)
@@ -29,6 +30,9 @@ const WIDE_COL = {
   SOL: 'solar_wm2', LTX: 'lightning',
 }
 
+// aliases whose underlying awos_metrics column holds TEXT (categorical) data.
+const TEXT_COL = { als_dn: 'D/N', sky_condition: 'SKY', present_weather: 'PW', lightning: 'LTX' }
+
 const chartMetrics = computed(() => {
   const list = (props.sensor.chart_metrics || '').split(',').map((m) => m.trim()).filter(Boolean)
   // Defaults per sensor code when chart_metrics not populated yet.
@@ -43,10 +47,17 @@ const chartMetrics = computed(() => {
   return list
 })
 
+const numericMetrics = computed(() =>
+  chartMetrics.value.filter((m) => !(WIDE_COL[m] && TEXT_COL[WIDE_COL[m]])),
+)
+const stringMetrics = computed(() =>
+  chartMetrics.value.filter((m) => WIDE_COL[m] && TEXT_COL[WIDE_COL[m]]),
+)
+
+const isState = computed(() => props.sensor.is_state === true || props.sensor.code === 'DCP')
+
 async function load() {
-  // Keep the current chart on screen while refreshing: only show the
-  // spinner on the VERY FIRST load, and NEVER clear existing metrics so
-  // the graph stays mounted across refreshes.
+  if (isState.value) return  // state sensors (DCP) show a status chip, no chart
   const first = !hasData()
   if (first) loading.value = true
   error.value = null
@@ -60,6 +71,16 @@ async function load() {
     }
     for (const m of aliases) if (!merged[m].length && metrics.value[m]) merged[m] = metrics.value[m]
     metrics.value = merged
+
+    const td = {}
+    for (const m of stringMetrics.value) {
+      const col = WIDE_COL[m]
+      td[m] = {
+        transitions: wide.textSeries?.[col] || [],
+        counts: wide.textCounts?.[col] || [],
+      }
+    }
+    if (Object.keys(td).length) textData.value = td
   } catch (e) {
     error.value = e.message
   } finally {
@@ -68,10 +89,12 @@ async function load() {
 }
 
 function hasData() {
-  return chartMetrics.value.some((m) => (metrics.value[m] || []).length > 0)
+  return numericMetrics.value.some((m) => (metrics.value[m] || []).length > 0) ||
+    stringMetrics.value.some((m) => {
+      const d = textData.value[m]
+      return d && ((d.transitions && d.transitions.length) || (d.counts && d.counts.length))
+    })
 }
-
-const isState = computed(() => props.sensor.is_state === true || props.sensor.code === 'DCP')
 
 // DCP: status comes from the backend /status/overview (online when at
 // least one other component on the site has fresh data). The overview may
@@ -90,8 +113,8 @@ const METRIC_META = {
   QNH: { ax: 0, unit: 'hPa' }, DA: { ax: 1, unit: 'ft' },
   WS: { ax: 0, unit: 'kt' }, WD: { ax: 1, unit: 'deg' }, WGS: { ax: 1, unit: 'kt' },
   RVR: { ax: 0, unit: 'm' }, VIS: { ax: 1, unit: 'm' }, ALS: { ax: 1, unit: 'cd' },
-  RA: { ax: 0, unit: 'mm' }, PW: { ax: 0, unit: '' }, LR1: { ax: 0, unit: '100ft' },
-  SKY: { ax: 1, unit: '' }, SOL: { ax: 0, unit: 'W/m2' }, LTX: { ax: 0, unit: '' },
+  RA: { ax: 0, unit: 'mm' }, LR1: { ax: 0, unit: '100ft' },
+  SOL: { ax: 0, unit: 'W/m2' },
 }
 const COLORS = ['#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#f472b6', '#fb7185']
 
@@ -101,7 +124,7 @@ const chartOption = computed(() => {
   const xMax = win.end || undefined
 
   const axisNames = ['', '']
-  for (const m of chartMetrics.value) {
+  for (const m of numericMetrics.value) {
     const meta = METRIC_META[m] || { ax: 0, unit: '' }
     if (meta.ax >= 0 && !axisNames[meta.ax]) {
       axisNames[meta.ax] = m === 'TEMP' ? '°C' : (m === 'DEWP' ? '°C' : (meta.unit || m))
@@ -113,10 +136,9 @@ const chartOption = computed(() => {
     { type: 'value', scale: true, name: axisNames[1] || undefined, nameGap: 6, nameTextStyle: { color: '#94a3b8', fontSize: 10 }, axisLabel: { color: '#64748b', fontSize: 11 }, splitLine: { show: false } },
   ]
 
-  const series = chartMetrics.value.map((m, i) => {
+  const series = numericMetrics.value.map((m, i) => {
     const meta = METRIC_META[m] || { ax: 0, unit: '' }
     const color = COLORS[i % COLORS.length]
-    // samples: [{time, value, is_valid}]
     const data = (metrics.value[m] || [])
       .filter((p) => p && typeof p.value === 'number')
       .map((p) => [p.time, p.value])
@@ -143,6 +165,37 @@ const chartOption = computed(() => {
   }
 })
 
+// String/categorical charts: state strip when few distinct values (e.g. D/N),
+// otherwise a minutes-per-value histogram (weather codes, sky, lightning).
+const stringCharts = computed(() => {
+  const win = liveWin.value || props.win || {}
+  const out = []
+  for (const m of stringMetrics.value) {
+    const d = textData.value[m]
+    if (!d) continue
+    const transitions = d.transitions || []
+    const counts = d.counts || []
+    if (!transitions.length && !counts.length) continue
+    let option
+    let height
+    if (counts.length <= 6) {
+      option = buildStringStateOption({
+        transitions,
+        startIso: win.start,
+        endIso: win.end,
+        name: m,
+      })
+      height = '104px'
+    } else {
+      const bars = Math.min(counts.length, 8) + (counts.length > 8 ? 1 : 0)
+      option = buildStringHistogramOption({ counts, name: m })
+      height = `${48 + bars * 18}px`
+    }
+    out.push({ alias: m, option, height })
+  }
+  return out
+})
+
 // Wind gust stats for ANEM (WGS max + its direction in range).
 const gustStats = computed(() => {
   if (props.sensor.code !== 'ANEM') return null
@@ -159,7 +212,7 @@ watch(() => [props.range, props.sensor.id, props.win?.start, props.win?.end], ()
   if (props.win) liveWin.value = { ...props.win }
   load()
 }, { deep: true })
-load()  // ALWAYS load — never skip data fetching for any component
+load()
 
 // Auto-refresh every 15s so the graph advances with the 1-minute /oneminute
 // cadence. load() no longer clears metrics, and refreshTick++ forces EChart
@@ -218,14 +271,22 @@ onBeforeUnmount(() => clearInterval(pollTimer))
       </div>
     </div>
 
-    <!-- Combined chart — ALWAYS rendered, no condition may hide it -->
+    <!-- Charts -->
     <div>
-      <!-- Loading only while there is NO data yet; once a chart exists it
-           stays on screen during refreshes (data merges in place). -->
       <div v-if="loading && !hasData()" class="py-10 text-center text-xs text-slate-500">Loading…</div>
       <div v-else-if="error && !hasData()" class="py-10 text-center text-xs text-red-400">{{ error }}</div>
-      <EChart v-else-if="chartMetrics.length" :option="chartOption" :refresh-tick="refreshTick" height="220px" />
-      <div v-else class="py-10 text-center text-xs text-slate-500">No chart configured</div>
+      <template v-else>
+        <!-- Numeric trend chart (kept for ATRH/BARO/ANEM/RAIN/SOLR + numeric half of mixed sensors) -->
+        <EChart v-if="numericMetrics.length" :option="chartOption" :refresh-tick="refreshTick" height="220px" />
+
+        <!-- String/categorical chart(s) added to the same card -->
+        <div v-for="sc in stringCharts" :key="sc.alias" class="mt-2">
+          <div class="mb-1 text-[10px] uppercase tracking-wide text-slate-500">{{ sc.alias }}</div>
+          <EChart :option="sc.option" :height="sc.height" />
+        </div>
+
+        <div v-if="!numericMetrics.length && !stringMetrics.length && !isState" class="py-10 text-center text-xs text-slate-500">No chart configured</div>
+      </template>
     </div>
   </div>
 </template>

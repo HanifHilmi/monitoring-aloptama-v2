@@ -18,6 +18,10 @@ const site = computed(() =>
 
 const sensors = computed(() => (site.value?.sensors || []).filter((s) => s.is_enabled !== false))
 
+// DCP is a state sensor (online/offline), shown in its own section.
+const dcpSensors = computed(() => sensors.value.filter((s) => s.is_state === true || s.code === 'DCP'))
+const sensorCards = computed(() => sensors.value.filter((s) => !(s.is_state === true || s.code === 'DCP')))
+
 const lastSampleIso = computed(() => {
   const ts = Math.max(0, ...sensors.value.map((s) => new Date(s.last_sample_time || 0).getTime()))
   return ts ? new Date(ts).toISOString() : null
@@ -71,10 +75,27 @@ onUnmounted(() => clearInterval(timer.value))
         <div class="panel">
           <div class="text-xs text-slate-500">Online Components</div>
           <div class="mt-1 text-2xl font-semibold text-white">
-            {{ sensors.filter((s) => s.status === 'ok').length }}/{{ sensors.length }}
+            {{ sensorCards.filter((s) => s.status === 'ok').length }}/{{ sensorCards.length }}
           </div>
         </div>
       </div>
+
+      <!-- DCP platform section (top, tweaked later) -->
+      <section v-if="dcpSensors.length">
+        <div class="mb-2 flex items-center justify-between">
+          <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">DCP</h2>
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <SensorCard
+            v-for="sensor in dcpSensors"
+            :key="sensor.id"
+            :sensor="sensor"
+            :site-slug="site.slug"
+            :range="range.key"
+            :win="range"
+          />
+        </div>
+      </section>
 
       <!-- Sensor grid (dynamic from master table - no repetitive coding) -->
       <section>
@@ -82,9 +103,9 @@ onUnmounted(() => clearInterval(timer.value))
           <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">Sensors</h2>
           <RangePicker v-model="range" />
         </div>
-        <div class="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+        <div class="grid gap-4 sm:grid-cols-2">
           <SensorCard
-            v-for="sensor in sensors"
+            v-for="sensor in sensorCards"
             :key="sensor.id"
             :sensor="sensor"
             :site-slug="site.slug"

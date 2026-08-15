@@ -224,3 +224,117 @@ export function buildUptimeStateMapOption({ samples, startIso, endIso }) {
     ],
   }
 }
+
+// State strip: colored segments over time for low-cardinality string data
+// (e.g. D/N = day/night). transitions = [{time, value}] change points; a
+// value of '' means "no state" and is rendered as a gap.
+export function buildStringStateOption({ transitions, startIso, endIso, name = '' }) {
+  const STATE_COLORS = ['#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#f472b6', '#fb7185']
+  const distinct = []
+  for (const t of transitions || []) {
+    if (t.value && t.value !== '' && !distinct.includes(t.value)) distinct.push(t.value)
+  }
+  const colorOf = {}
+  distinct.forEach((v, i) => { colorOf[v] = STATE_COLORS[i % STATE_COLORS.length] })
+
+  const markAreaData = []
+  for (let i = 0; i < (transitions || []).length; i++) {
+    const cur = transitions[i]
+    if (!cur.value || cur.value === '') continue
+    const next = transitions[i + 1]
+    const end = next ? next.time : endIso
+    if (new Date(end) <= new Date(cur.time)) continue
+    markAreaData.push([
+      { xAxis: cur.time, name: cur.value, itemStyle: { color: colorOf[cur.value], opacity: 0.6 } },
+      { xAxis: end, itemStyle: { color: colorOf[cur.value], opacity: 0 } },
+    ])
+  }
+
+  return {
+    animation: true,
+    animationDuration: 400,
+    grid: { left: 12, right: 16, top: 8, bottom: 0, containLabel: true },
+    tooltip: {
+      ...baseTooltip(),
+      formatter: (params) => {
+        const p = Array.isArray(params) ? params[0] : params
+        return `<b>${p.name || '—'}</b>`
+      },
+    },
+    xAxis: {
+      type: 'time',
+      min: startIso,
+      max: endIso,
+      axisLine: { lineStyle: { color: AXIS_COLOR } },
+      axisLabel: { color: AXIS_COLOR, fontSize: 11 },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: 'category',
+      data: distinct,
+      axisLabel: { color: AXIS_COLOR, fontSize: 11 },
+      splitLine: { show: false },
+    },
+    series: [
+      {
+        name,
+        type: 'line',
+        data: [],
+        showSymbol: false,
+        lineStyle: { color: '#10b981', width: 2 },
+        markArea: { data: markAreaData },
+      },
+    ],
+  }
+}
+
+// Histogram of minutes-per-value for high-cardinality string data (weather
+// codes, cloud layers, lightning). Top 8 values + "other".
+export function buildStringHistogramOption({ counts, name = '' }) {
+  const MAX_BARS = 8
+  const items = (counts || []).slice()
+  let others = 0
+  if (items.length > MAX_BARS) {
+    others = items.slice(MAX_BARS).reduce((s, x) => s + x.count, 0)
+    items.length = MAX_BARS
+  }
+  const labels = items.map((x) => x.value)
+  const values = items.map((x) => x.count)
+  if (others > 0) { labels.push('other'); values.push(others) }
+
+  return {
+    animation: true,
+    grid: { left: 8, right: 16, top: 8, bottom: 0, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      backgroundColor: '#0b1220',
+      borderColor: '#1e2a45',
+      textStyle: { color: '#e2e8f0', fontSize: 12 },
+      formatter: (params) => {
+        const p = Array.isArray(params) ? params[0] : params
+        return `${p.name}<br/><b>${p.value}</b> min`
+      },
+    },
+    xAxis: {
+      type: 'value',
+      axisLabel: { color: AXIS_COLOR, fontSize: 11 },
+      splitLine: { lineStyle: { color: SPLIT_COLOR } },
+    },
+    yAxis: {
+      type: 'category',
+      data: labels,
+      axisLabel: { color: AXIS_COLOR, fontSize: 11 },
+      splitLine: { show: false },
+    },
+    series: [
+      {
+        name,
+        type: 'bar',
+        data: values,
+        barWidth: '60%',
+        itemStyle: { color: '#38bdf8', borderRadius: [0, 3, 3, 0] },
+      },
+    ],
+  }
+}

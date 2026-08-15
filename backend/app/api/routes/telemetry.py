@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -48,6 +48,9 @@ WIDE_ALIAS = {
     "RA": "precip_mm", "PW": "present_weather",
     "SOL": "solar_wm2", "LTX": "lightning",
 }
+
+# awos_metrics columns that hold TEXT values (categorical, not numeric).
+_TEXT_COLUMNS = {"als_dn", "sky_condition", "present_weather", "lightning"}
 
 
 def _parse_dt(v: str | None):
@@ -113,68 +116,104 @@ async def get_wide_telemetry(
     if not cols:
         return {
             "site": site_slug, "metrics": [], "count": 0, "series": {},
+            "textSeries": {}, "textCounts": {},
             "range": range, "start": s_dt, "end": e_dt, "downsampled": False,
         }
 
-    # LTTB when the window exceeds 1 day (or downsample explicitly given).
+    numeric_cols = [c for c in cols if c not in _TEXT_COLUMNS]
+    text_cols = [c for c in cols if c in _TEXT_COLUMNS]
+
+    # ---- Numeric series: LTTB when window > 1 day (or downsample given) ----
     window = e_dt - s_dt
     do_downsample = downsample is not None or window > timedelta(days=1)
     threshold = downsample or settings.lttb_default_threshold
 
-    # Fetch ONLY the requested columns as light tuples (not ORM objects), and
-    # decimate in SQL when the window would yield far more minutes than the
-    # LTTB threshold: pick the LATEST row per time_bucket so Python never
-    # processes more than ~2x threshold points, no matter the window size.
-    window_seconds = max(1, int(window.total_seconds()))
-    bucket_minutes = None
-    if window_seconds // 60 > threshold * 2:
-        bucket_minutes = max(1, window_seconds // 60 // (threshold * 2))
-
-    col_exprs = [getattr(AwosMetrics, c) for c in cols]
-    base = (
-        select(AwosMetrics.time, *col_exprs)
-        .where(AwosMetrics.site_id == site_slug, AwosMetrics.time >= s_dt, AwosMetrics.time <= e_dt)
-    )
-    if bucket_minutes:
-        bucket_expr = func.time_bucket(timedelta(minutes=bucket_minutes), AwosMetrics.time)
-        stmt = base.distinct(bucket_expr).order_by(bucket_expr, AwosMetrics.time.desc())
-    else:
-        stmt = base.order_by(AwosMetrics.time.asc())
-    rows = (await db.execute(stmt)).all()
-    if bucket_minutes:
-        rows = sorted(rows, key=lambda r: r[0])  # LTTB needs ascending time
-
-    # Group values per requested column: [(datetime, value), ...].
-    # Only numeric columns produce a series — TEXT columns (present_weather,
-    # sky_condition, als_dn, lightning) are skipped (their values are strings
-    # like 'NCD' and never plotted by the frontend).
-    per_col: dict[str, list] = {c: [] for c in cols}
-    for r in rows:
-        for i, c in enumerate(cols):
-            v = r[i + 1]
-            if isinstance(v, (int, float)) and not isinstance(v, bool):
-                per_col[c].append((r[0], float(v)))
-
     series: dict[str, list[dict]] = {}
     downsampled = 0
-    for c in cols:
-        pts = per_col[c]
-        if do_downsample and len(pts) > threshold:
-            t0 = pts[0][0].timestamp()
-            sampled = downsample_series(pts, threshold)
-            series[c] = [
-                {"time": datetime.fromtimestamp(t0 + x, tz=timezone.utc), "value": y}
-                for x, y in sampled
-            ]
-            downsampled += 1
+    count = 0
+    if numeric_cols:
+        # Fetch ONLY the requested numeric columns as light tuples (not ORM
+        # objects), and decimate in SQL when the window would yield far more
+        # minutes than the LTTB threshold: pick the LATEST row per time_bucket
+        # so Python never processes more than ~2x threshold points.
+        window_seconds = max(1, int(window.total_seconds()))
+        bucket_minutes = None
+        if window_seconds // 60 > threshold * 2:
+            bucket_minutes = max(1, window_seconds // 60 // (threshold * 2))
+
+        col_exprs = [getattr(AwosMetrics, c) for c in numeric_cols]
+        base = (
+            select(AwosMetrics.time, *col_exprs)
+            .where(AwosMetrics.site_id == site_slug, AwosMetrics.time >= s_dt, AwosMetrics.time <= e_dt)
+        )
+        if bucket_minutes:
+            bucket_expr = func.time_bucket(timedelta(minutes=bucket_minutes), AwosMetrics.time)
+            stmt = base.distinct(bucket_expr).order_by(bucket_expr, AwosMetrics.time.desc())
         else:
-            series[c] = [{"time": t, "value": v} for t, v in pts]
+            stmt = base.order_by(AwosMetrics.time.asc())
+        rows = (await db.execute(stmt)).all()
+        if bucket_minutes:
+            rows = sorted(rows, key=lambda r: r[0])  # LTTB needs ascending time
+        count = len(rows)
+
+        per_col: dict[str, list] = {c: [] for c in numeric_cols}
+        for r in rows:
+            for i, c in enumerate(numeric_cols):
+                v = r[i + 1]
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    per_col[c].append((r[0], float(v)))
+
+        for c in numeric_cols:
+            pts = per_col[c]
+            if do_downsample and len(pts) > threshold:
+                t0 = pts[0][0].timestamp()
+                sampled = downsample_series(pts, threshold)
+                series[c] = [
+                    {"time": datetime.fromtimestamp(t0 + x, tz=timezone.utc), "value": y}
+                    for x, y in sampled
+                ]
+                downsampled += 1
+            else:
+                series[c] = [{"time": t, "value": v} for t, v in pts]
+
+    # ---- Text series: value change points + per-value minute counts ----
+    text_series: dict[str, list[dict]] = {}
+    text_counts: dict[str, list[dict]] = {}
+    for c in text_cols:
+        trans = (
+            await db.execute(
+                text(
+                    "SELECT time, " + c + " AS v FROM ("
+                    "  SELECT time, " + c + ", LAG(" + c + ") OVER (ORDER BY time) AS prev "
+                    "  FROM awos_metrics WHERE site_id = :slug AND time >= :s AND time <= :e"
+                    ") sub WHERE " + c + " IS DISTINCT FROM prev OR prev IS NULL LIMIT 1000"
+                ),
+                {"slug": site_slug, "s": s_dt, "e": e_dt},
+            )
+        ).all()
+        text_series[c] = [
+            {"time": t, "value": v if v is not None else ""} for t, v in trans
+        ]
+        cnt = (
+            await db.execute(
+                text(
+                    "SELECT " + c + " AS v, COUNT(*) AS n FROM awos_metrics "
+                    "WHERE site_id = :slug AND time >= :s AND time <= :e "
+                    "AND " + c + " IS NOT NULL AND " + c + " <> '' "
+                    "GROUP BY " + c + " ORDER BY n DESC LIMIT 20"
+                ),
+                {"slug": site_slug, "s": s_dt, "e": e_dt},
+            )
+        ).all()
+        text_counts[c] = [{"value": v, "count": n} for v, n in cnt]
 
     return {
         "site": site_slug,
         "metrics": cols,
-        "count": len(rows),
+        "count": count,
         "series": series,
+        "textSeries": text_series,
+        "textCounts": text_counts,
         "range": range,
         "start": s_dt,
         "end": e_dt,
