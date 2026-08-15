@@ -64,7 +64,7 @@ def _parse_dt(v: str | None):
 @router.get("/{site_slug}")
 async def get_wide_telemetry(
     site_slug: str,
-    range: str = Query("today", pattern="^(15m|30m|1h|3h|12h|1h|6h|24h|7d|30d|today|3d|week|month)$"),
+    range: str = Query("today", pattern="^(15m|30m|1h|3h|12h|1h|6h|24h|7d|30d|today|3d|week|month|custom)$"),
     start: str | None = Query(default=None, description="ISO-8601 UTC start (overrides range)"),
     end: str | None = Query(default=None, description="ISO-8601 UTC end (overrides range)"),
     metrics: str | None = Query(default=None, description="Comma-separated metric aliases"),
