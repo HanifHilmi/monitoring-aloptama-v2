@@ -160,8 +160,12 @@ async def get_wide_telemetry(
         for r in rows:
             for i, c in enumerate(numeric_cols):
                 v = r[i + 1]
-                if isinstance(v, (int, float)) and not isinstance(v, bool):
-                    per_col[c].append((r[0], float(v)))
+                # Keep NULL minutes so the frontend can break the line at
+                # gaps (sensor offline). LTTB still filters them out.
+                per_col[c].append((
+                    r[0],
+                    float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None,
+                ))
 
         for c in numeric_cols:
             pts = per_col[c]

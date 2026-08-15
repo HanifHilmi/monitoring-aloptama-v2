@@ -75,7 +75,7 @@ onUnmounted(() => clearInterval(timer.value))
         <div class="panel">
           <div class="text-xs text-slate-500">Online Components</div>
           <div class="mt-1 text-2xl font-semibold text-white">
-            {{ sensorCards.filter((s) => s.status === 'ok').length }}/{{ sensorCards.length }}
+            {{ sensors.filter((s) => s.status === 'ok').length }}/{{ sensors.length }}
           </div>
         </div>
       </div>

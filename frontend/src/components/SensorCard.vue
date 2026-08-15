@@ -139,16 +139,21 @@ const chartOption = computed(() => {
   const series = numericMetrics.value.map((m, i) => {
     const meta = METRIC_META[m] || { ax: 0, unit: '' }
     const color = COLORS[i % COLORS.length]
+    // Keep NULL points so connectNulls:false breaks the line at missing
+    // minutes (sensor offline) instead of drawing across the gap.
     const data = (metrics.value[m] || [])
-      .filter((p) => p && typeof p.value === 'number')
-      .map((p) => [p.time, p.value])
+      .filter((p) => p && p.time)
+      .map((p) => [p.time, typeof p.value === 'number' ? p.value : null])
+    // Ceilometer LR1 is a ceiling reading -> dots, not a connected line.
+    const isDot = m === 'LR1'
     return {
       name: meta.unit ? `${m} (${meta.unit})` : m,
-      type: 'line',
+      type: isDot ? 'scatter' : 'line',
       yAxisIndex: meta.ax,
-      showSymbol: false,
+      showSymbol: isDot,
+      symbolSize: isDot ? 5 : 0,
       data,
-      lineStyle: { width: 1.5, color },
+      lineStyle: isDot ? undefined : { width: 1.5, color },
       itemStyle: { color },
       connectNulls: false,
     }
@@ -165,8 +170,9 @@ const chartOption = computed(() => {
   }
 })
 
-// String/categorical charts: state strip when few distinct values (e.g. D/N),
-// otherwise a minutes-per-value histogram (weather codes, sky, lightning).
+// String/categorical charts: only D/N uses a day/night state strip; weather
+// codes, cloud layers and lightning are always shown as a minutes-per-value
+// histogram (readable at any window size).
 const stringCharts = computed(() => {
   const win = liveWin.value || props.win || {}
   const out = []
@@ -178,7 +184,7 @@ const stringCharts = computed(() => {
     if (!transitions.length && !counts.length) continue
     let option
     let height
-    if (counts.length <= 6) {
+    if (WIDE_COL[m] === 'als_dn' && transitions.length) {
       option = buildStringStateOption({
         transitions,
         startIso: win.start,
