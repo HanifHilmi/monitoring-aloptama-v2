@@ -165,9 +165,10 @@ load()  // ALWAYS load — never skip data fetching for any component
 // cadence. load() no longer clears metrics, and refreshTick++ forces EChart
 // to re-render even if the option identity is unchanged.
 async function poll() {
-  // Roll the window END to the current time so the query returns rows up
-  // to NOW (previously it was pinned to the picker-time end -> froze).
-  if (liveWin.value) {
+  // Roll the window END to the current time only for relative (preset)
+  // ranges so live graphs keep advancing. A custom range pins an explicit
+  // end (e.g. a historical month) and must NOT drift to today.
+  if (liveWin.value && props.range !== 'custom') {
     liveWin.value = { ...liveWin.value, end: new Date().toISOString() }
   }
   await load()
