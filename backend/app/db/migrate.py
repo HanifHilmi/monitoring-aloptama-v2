@@ -135,12 +135,3 @@ async def reset_database(session: AsyncSession) -> None:
     await session.execute(text("CREATE SCHEMA public"))
     await session.commit()
     logger.info("Database reset (public schema recreated)")
-
-
-async def is_database_initialized(session: AsyncSession) -> bool:
-    if not await _table_exists(session, "awos_metrics"):
-        return False
-    cnt = (await session.execute(select(func.count(AwosMetrics.time)))).scalar_one()
-    return cnt > 0
-
-    return not await is_database_uninitialized(session)

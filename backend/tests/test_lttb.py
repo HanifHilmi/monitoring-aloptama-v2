@@ -48,3 +48,25 @@ def test_downsample_series_datetime() -> None:
 
 def test_downsample_series_empty() -> None:
     assert downsample_series([], 1000) == []
+
+
+def test_downsample_series_skips_none_values() -> None:
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    pairs = [
+        (t0, None),
+        (t0.replace(minute=1), 2.0),
+        (t0.replace(minute=2), None),
+        (t0.replace(minute=3), 8.0),
+    ]
+    out = downsample_series(pairs, threshold=1000)
+    # None values must be dropped, never converted to NaN.
+    assert all(p[1] == p[1] for p in out)  # no NaN
+    assert len(out) == 2
+    assert out[0] == (0.0, 2.0)
+    assert out[-1] == (120.0, 8.0)
+
+
+def test_downsample_series_all_none() -> None:
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    out = downsample_series([(t0, None), (t0.replace(minute=1), None)], 1000)
+    assert out == []

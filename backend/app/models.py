@@ -1,14 +1,11 @@
 """SQLAlchemy ORM models mirroring the TimescaleDB schema."""
 
-from datetime import date, datetime
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import (
     ARRAY,
-    BigInteger,
     Boolean,
-    CheckConstraint,
-    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -18,7 +15,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import INET, JSONB
+from sqlalchemy.dialects.postgresql import INET
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
@@ -86,47 +83,6 @@ class CdpConnectivity(Base):
     reachable: Mapped[bool] = mapped_column(Boolean)
     rtt_ms: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-
-class DowntimeEvent(Base):
-    __tablename__ = "downtime_events"
-    __table_args__ = (
-        CheckConstraint(
-            "(scope_type = 'sla' AND cdp_id IS NOT NULL AND sensor_id IS NULL) OR "
-            "(scope_type = 'ola' AND sensor_id IS NOT NULL AND cdp_id IS NULL)",
-            name="ck_downtime_scope_entity",
-        ),
-    )
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    scope_type: Mapped[str] = mapped_column(String)
-    entity_type: Mapped[str] = mapped_column(String)
-    cdp_id: Mapped[Optional[int]] = mapped_column(ForeignKey("cdp_nodes.id", ondelete="CASCADE"), nullable=True)
-    sensor_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sensors.id", ondelete="CASCADE"), nullable=True)
-    component_code: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    site_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), nullable=True)
-    start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    end_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    reason_code: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    details: Mapped[dict] = mapped_column(JSONB, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
-
-
-class DailySlaOla(Base):
-    __tablename__ = "daily_sla_ola"
-
-    weo_time: Mapped[date] = mapped_column(Date, primary_key=True)
-    scope_type: Mapped[str] = mapped_column(String, primary_key=True)
-    entity_type: Mapped[str] = mapped_column(String, primary_key=True)
-    cdp_id: Mapped[int] = mapped_column(Integer, primary_key=True, default=0)    # 0 = not applicable (OLA)
-    sensor_id: Mapped[int] = mapped_column(Integer, primary_key=True, default=0)  # 0 = not applicable (SLA)
-    site_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    total_seconds: Mapped[int] = mapped_column(BigInteger)
-    uptime_seconds: Mapped[int] = mapped_column(BigInteger)
-    downtime_seconds: Mapped[int] = mapped_column(BigInteger)
-    uptime_pct: Mapped[float] = mapped_column(Float)
-    open_events: Mapped[int] = mapped_column(Integer, default=0)
-    closed_events: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class AwosMetrics(Base):

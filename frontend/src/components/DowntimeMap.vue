@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api } from '@/api/client'
 import EChart from '@/components/EChart.vue'
 
@@ -131,6 +131,8 @@ function buildOption() {
   }
 }
 
+const option = computed(() => buildOption())
+
 // ---- Year picker (matches other sections) ----
 const yearOpen = ref(false)
 const yearPageStart = ref(Y_MIN)
@@ -188,7 +190,7 @@ onBeforeUnmount(() => clearInterval(timer))
     <div v-else-if="!cdps.length" class="py-12 text-center text-xs text-slate-500">No CDP nodes</div>
     <!-- ONE card: CDP1 (top half) + CDP2 (bottom half), shared piecewise legend -->
     <div v-else class="panel">
-      <EChart :option="buildOption()" height="340px" />
+      <EChart :option="option" height="340px" />
     </div>
   </div>
 </template>

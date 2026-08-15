@@ -138,24 +138,8 @@ class SlaOlaSummary(BaseModel):
 
 
 # ----------------------------------------------------------------------
-# Downtime
+# Health
 # ----------------------------------------------------------------------
-class DowntimeEventOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    scope_type: str
-    entity_type: str
-    cdp_id: Optional[int] = None
-    sensor_id: Optional[int] = None
-    site_id: Optional[int] = None
-    start_time: datetime
-    end_time: Optional[datetime] = None
-    duration_seconds: Optional[int] = None
-    reason_code: Optional[str] = None
-    details: dict[str, Any] = Field(default_factory=dict)
-
-
 class HealthResponse(BaseModel):
     status: str
     version: str

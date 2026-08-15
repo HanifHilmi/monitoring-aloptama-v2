@@ -3,41 +3,30 @@
 Responsibilities:
 - Periodically probe CDP nodes (active-passive failover via ``CdpReader``).
 - Ingest 1-minute telemetry logs (with raw-DCP fallback).
-- Feed the SLA/OLA downtime state machine.
-- Periodically rebuild the ``daily_sla_ola`` rollup hypertable.
+
+SLA/OLA is computed by the API layer directly from the raw
+``cdp_connectivity`` and ``awos_metrics`` hypertables using SQL
+``COUNT(*) FILTER`` aggregates; this worker never materializes downtime
+events or rollups.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal
 from app.ingestion.cdp_reader import CdpReader
-from app.ingestion.components import row_dcp_online, site_components, wide_row_components
+from app.ingestion.components import group_wide
 from app.ingestion.parsers import parse_site_batch, parse_timestamp_from_filename
-from app.ingestion.state_machine import (
-    DowntimeStateMachine,
-    load_open_events,
-    transition_ola,
-    transition_ola_component,
-    transition_sla,
-)
-from app.models import (
-    AwosMetrics,
-    CdpConnectivity,
-    CdpNode,
-    Sensor,
-    Site,
-)
-from app.services.rollup import rebuild_daily_rollups
+from app.models import AwosMetrics, CdpConnectivity, CdpNode, Sensor, Site
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +34,8 @@ logger = logging.getLogger(__name__)
 class IngestionWorker:
     """Long-running async ingestion loop."""
 
-    def __init__(self, reader: CdpReader, sm: DowntimeStateMachine):
+    def __init__(self, reader: CdpReader):
         self.reader = reader
-        self.sm = sm
         self._stop = asyncio.Event()
         self._tasks: list[asyncio.Task] = []
         self._watermarks: dict[str, datetime] = {}
@@ -59,7 +47,6 @@ class IngestionWorker:
         self._tasks = [
             asyncio.create_task(self._cdp_loop(), name="cdp-loop"),
             asyncio.create_task(self._telemetry_loop(), name="telemetry-loop"),
-            asyncio.create_task(self._rollup_loop(), name="rollup-loop"),
         ]
 
     async def stop(self) -> None:
@@ -81,12 +68,14 @@ class IngestionWorker:
         while not self._stop.is_set():
             try:
                 async with AsyncSessionLocal() as session:
-                    await self._check_cdps(session, persist=(
+                    now = datetime.now(timezone.utc)
+                    persist = (
                         last_persist is None
-                        or (datetime.now(timezone.utc) - last_persist).total_seconds() >= 60
-                    ))
-                    if last_persist is None or (datetime.now(timezone.utc) - last_persist).total_seconds() >= 60:
-                        last_persist = datetime.now(timezone.utc)
+                        or (now - last_persist).total_seconds() >= 60
+                    )
+                    await self._check_cdps(session, persist=persist)
+                    if persist:
+                        last_persist = now
             except Exception:
                 logger.exception("CDP check loop error")
             await asyncio.sleep(settings.cdps_check_interval_seconds)
@@ -132,16 +121,6 @@ class IngestionWorker:
             )
         )
 
-        # State machine transition (SLA)
-        await transition_sla(
-            session,
-            self.sm,
-            cdp_id=node.id,
-            site_id=None,
-            reachable=reachable,
-            ts=ts,
-        )
-
     # ------------------------------------------------------------------
     async def _telemetry_loop(self) -> None:
         """Ingest the latest 1-minute log window with raw-DCP fallback."""
@@ -152,56 +131,6 @@ class IngestionWorker:
             except Exception:
                 logger.exception("Telemetry ingestion error")
             await asyncio.sleep(settings.ingestion_interval_seconds)
-
-    # Wide-row metric -> awos_metrics column mapping (value vs text).
-    _WIDE_COLUMNS = {
-        "TEMP": ("temp_c", False), "DEWP": ("dewp_c", False), "RH": ("rh_pct", False),
-        "QNH": ("qnh_hpa", False), "DA": ("da_ft", False),
-        "WS": ("wind_speed_kt", False), "WD": ("wind_dir_deg", False),
-        "WGS": ("gust_speed_kt", False), "WGD": ("gust_dir_deg", False),
-        "RVR": ("rvr_m", False), "VIS": ("vis_m", False), "ALS": ("als_cd", False),
-        "D/N": ("als_dn", True), "RLS": ("rls", False),
-        "LR1": ("lr1_100ft", False), "SKY": ("sky_condition", True),
-        "RA": ("precip_mm", False), "PW": ("present_weather", True),
-        "SOL": ("solar_wm2", False), "LTX": ("lightning", True),
-    }
-
-    @staticmethod
-    def _group_wide(parsed_by_code: dict, site_id: str) -> list[dict]:
-        """Collapse EAV metrics into one wide row per (minute, site)."""
-        rows: dict = {}
-        for code, metrics in (parsed_by_code or {}).items():
-            for m in metrics or []:
-                if not m.is_valid or m.ts is None:
-                    continue
-                col = IngestionWorker._WIDE_COLUMNS.get(m.metric)
-                if not col:
-                    continue
-                column, is_text = col
-                key = m.ts.replace(second=0, microsecond=0)
-                row = rows.setdefault(key, {"time": key, "site_id": site_id})
-                if is_text:
-                    # Empty text field = healthy, no event -> empty string.
-                    row[column] = (m.text_value or "")
-                else:
-                    # Empty numeric field = healthy -> 0. Explicit missing is
-                    # skipped above (is_valid False) so the column stays NULL.
-                    row[column] = m.value if m.value is not None else 0
-        # WGS/WGD are tied to WS/WD: if wind is missing (///) the sensor is
-        # OFFLINE -> gust = NULL. If wind is ONLINE/valid, gust is 0 when the
-        # WGS/WGD fields are missing or empty (offline WGS/WGD columns parse
-        # to None and are skipped above, so default them to 0 here).
-        for row in rows.values():
-            wind_ok = row.get("wind_speed_kt") is not None and row.get("wind_dir_deg") is not None
-            if not wind_ok:
-                row["gust_speed_kt"] = None
-                row["gust_dir_deg"] = None
-            else:
-                if row.get("gust_speed_kt") is None:
-                    row["gust_speed_kt"] = 0
-                if row.get("gust_dir_deg") is None:
-                    row["gust_dir_deg"] = 0
-        return list(rows.values())
 
     async def _ingest_latest(self, session: AsyncSession) -> None:
         now = datetime.now(timezone.utc)
@@ -236,7 +165,6 @@ class IngestionWorker:
     ) -> None:
         # Build unified sensor specs (WIDN symbol/station for column mapping).
         specs: dict[str, dict] = {}
-        sensor_nodes: dict[str, Sensor] = {}
         for s in sensors:
             if not s.is_enabled:
                 continue
@@ -248,7 +176,6 @@ class IngestionWorker:
             if s.station:
                 entry["station"] = s.station
             specs[s.code] = entry
-            sensor_nodes[s.code] = s
 
         # Resolve the TARGET-DAY oneminute file only (live; no old-day replay).
         one_min_path = None
@@ -270,32 +197,12 @@ class IngestionWorker:
         # WATERMARK: keep minutes strictly > the stored max (grabs delayed
         # minutes naturally) and not in the future.
         rows = [
-            r for r in self._group_wide(parsed, site.slug)
+            r for r in group_wide(parsed, site.slug)
             if r["time"] > watermark and r["time"] <= now
         ]
         if not rows:
             return
 
-        # NEW OLA source: per-(site, component) validity from wide rows.
-        present: set[str] = set()
-        for r in rows:
-            for comp in wide_row_components(r):
-                present.add(comp)
-                await transition_ola_component(
-                    session, self.sm, site_id=site.id, component_code=comp,
-                    is_down=False, ts=r["time"],
-                )
-            if row_dcp_online(r):
-                present.add("DCP")
-        # Open OLA downtime only for configured components missing this minute.
-        for comp in site_components(site.slug):
-            if comp not in present:
-                await transition_ola_component(
-                    session, self.sm, site_id=site.id, component_code=comp,
-                    is_down=True, ts=now,
-                )
-
-        await self._persist_site_samples(session, site, sensor_nodes, parsed, now)
         await self._persist_site_wide(session, rows)
         logger.debug(
             "Site %s watermark %s -> uploaded %d wide minutes",
@@ -319,73 +226,6 @@ class IngestionWorker:
             },
         )
         await session.execute(upsert)
-
-    async def _ingest_site_minute(
-        self,
-        session: AsyncSession,
-        site: Site,
-        sensors: list[Sensor],
-        ts: datetime,
-    ) -> None:
-        # Build unified sensor specs (WIDN symbol/station for column mapping)
-        specs: dict[str, dict] = {}
-        sensor_nodes: dict[str, Sensor] = {}
-        for s in sensors:
-            if not s.is_enabled:
-                continue
-            entry: dict = {"sensor_id": s.id}
-            if s.fallback_slice:
-                entry["fallback_slice"] = s.fallback_slice
-            if s.symbol:
-                entry["symbol"] = s.symbol
-            if s.station:
-                entry["station"] = s.station
-            specs[s.code] = entry
-            sensor_nodes[s.code] = s
-
-        # Resolve the TARGET-DAY oneminute file only (live, no backfill).
-        one_min_path = None
-        for prefix in site.file_prefixes or []:
-            p = self.reader.resolve_site_file(prefix, ts)
-            if p and p.exists():
-                one_min_path = p
-                break
-        if one_min_path is None:
-            logger.debug("No oneminute file for site %s at %s", site.code, ts)
-            return
-
-        default_ts = parse_timestamp_from_filename(one_min_path.name) or ts
-        parsed = parse_site_batch(one_min_path, None, specs, default_ts)
-        if not parsed:
-            logger.debug("No parseable file for site %s at %s", site.code, ts)
-            return
-
-        # Persist telemetry + OLA transitions
-        await self._persist_site_samples(session, site, sensor_nodes, parsed, ts)
-        logger.debug(
-            "Site %s minute %s: %d sensors parsed", site.code, ts, len(parsed)
-        )
-
-    async def _persist_site_samples(self, *args, **kwargs) -> None:
-        """Legacy EAV writer removed in step-2; OLA is driven from wide rows."""
-        return
-
-
-    async def _rollup_loop(self) -> None:
-        """Periodically rebuild daily SLA/OLA rollups."""
-        async with AsyncSessionLocal() as session:
-            await self._rebuild_rollup(session)
-        while not self._stop.is_set():
-            try:
-                async with AsyncSessionLocal() as session:
-                    await self._rebuild_rollup(session)
-            except Exception:
-                logger.exception("Rollup loop error")
-            await asyncio.sleep(settings.rollup_interval_minutes * 60)
-
-    async def _rebuild_rollup(self, session: AsyncSession) -> None:
-        days = (datetime.now(timezone.utc) - timedelta(days=45)).date()
-        await rebuild_daily_rollups(session, days, datetime.now(timezone.utc).date())
 
 
 async def build_worker(session: AsyncSession) -> IngestionWorker:
@@ -411,10 +251,8 @@ async def build_worker(session: AsyncSession) -> IngestionWorker:
         }
         for n in nodes
     ]
-    sm = DowntimeStateMachine()
-    await load_open_events(session, sm)
     reader = CdpReader(node_dicts)
-    return IngestionWorker(reader, sm)
+    return IngestionWorker(reader)
 
 
 async def main() -> None:

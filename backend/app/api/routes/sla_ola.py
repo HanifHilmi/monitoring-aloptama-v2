@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.ingestion.components import COMPONENT_COLUMNS, SITE_COMPONENTS
-from app.models import AwosMetrics, CdpNode, Sensor, Site
+from app.models import CdpNode, Sensor, Site
 
 router = APIRouter(prefix="/sla-ola", tags=["sla-ola"])
 
@@ -102,48 +102,44 @@ async def _site_data_availability(db: AsyncSession, site: Site, start: datetime,
         return {"site_id": site.id, "slug": site.slug, "code": site.code, "name": site.name,
                 "data_availability_pct": 0.0, "components": []}
 
-    components: dict[str, list[int]] = {}
-    for s in sensors:
-        comp = s.component or s.code
-        components.setdefault(comp, []).append(s.id)
-
-    # NEW OLA source: component validity from the WIDE awos_metrics table.
+    # OLA source: component validity from the WIDE awos_metrics table.
+    # ONE hypertable scan computes, per component, the count of minutes
+    # where ANY of its columns is non-NULL, plus the DCP count (minutes
+    # where any non-DCP column has data). Previously this looped over every
+    # row in Python (43k rows/month/site) — now it is a single SQL pass.
     total_period_minutes = max(1, int((end - start).total_seconds() // 60))
-    all_rows = (
-        await db.execute(
-            select(AwosMetrics)
-            .where(AwosMetrics.site_id == site.slug, AwosMetrics.time >= start, AwosMetrics.time <= end)
-        )
-    ).scalars().all()
 
-    comp_counts: dict[str, int] = {}
-    dcp_present = 0
-    for r in all_rows:
-        for comp, cols in COMPONENT_COLUMNS.items():
-            if any(getattr(r, c) is not None for c in cols):
-                comp_counts[comp] = comp_counts.get(comp, 0) + 1
-        # DCP is ONLINE for THIS minute when any non-DCP column has data,
-        # so it must count EVERY such minute (not cap at 1).
-        if any(getattr(r, c) is not None
-               for cc in COMPONENT_COLUMNS.values() for c in cc):
-            dcp_present += 1
+    filters = []
+    for comp, cols in COMPONENT_COLUMNS.items():
+        cond = " OR ".join(f"{c} IS NOT NULL" for c in cols)
+        filters.append(f"COUNT(*) FILTER (WHERE {cond}) AS {comp.lower()}")
+    all_cols = sorted({c for cols in COMPONENT_COLUMNS.values() for c in cols})
+    dcp_cond = " OR ".join(f"{c} IS NOT NULL" for c in all_cols)
+    filters.append(f"COUNT(*) FILTER (WHERE {dcp_cond}) AS dcp")
+
+    row = (
+        await db.execute(
+            text(
+                "SELECT " + ", ".join(filters)
+                + " FROM awos_metrics "
+                "WHERE site_id = :slug AND time >= :start AND time <= :end"
+            ),
+            {"slug": site.slug, "start": start, "end": end},
+        )
+    ).one()
+    counts = dict(row._mapping)
+    comp_counts = {comp: int(counts.get(comp.lower()) or 0) for comp in COMPONENT_COLUMNS}
+    dcp_present = int(counts.get("dcp") or 0)
 
     comp_rows = []
     overall_valid = 0
     overall_expected = 0
-    codes = list(SITE_COMPONENTS.get(site.slug, list(COMPONENT_COLUMNS))) + ["DCP"] if False else None
-    from app.ingestion.components import SITE_COMPONENTS
     codes = list(SITE_COMPONENTS.get(site.slug, [])) + ["DCP"]
     for comp in codes:
-        if comp == "DCP":
-            observed = dcp_present if dcp_present else 0
-            valid = dcp_present
-        else:
-            observed = comp_counts.get(comp, 0)
-            valid = observed
+        valid = dcp_present if comp == "DCP" else comp_counts.get(comp, 0)
         expected = total_period_minutes
         pct = min(100.0, (valid / expected * 100.0)) if expected else 0.0
-        comp_rows.append({"component": comp, "uptime_pct": round(pct, 4), "samples": observed})
+        comp_rows.append({"component": comp, "uptime_pct": round(pct, 4), "samples": valid})
         overall_expected += expected
         overall_valid += valid
 

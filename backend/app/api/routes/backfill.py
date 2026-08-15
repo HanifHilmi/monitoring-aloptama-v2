@@ -1,14 +1,12 @@
 """Manual backfill endpoints (Settings -> Backfill).
 
-- ``POST /backfill/cdp``: SLA from the oneminute WIDN files at FULL
+- ``POST /backfill/all/start``: SLA from the oneminute WIDN files at FULL
   1-minute resolution, filling BACKWARDS from now -> backfill_start so the
-  most recent data lands first. Per minute it checks whether the matching
-  oneminute file contains that minute's row; writes one CdpConnectivity
-  row per minute (reachable = row present). Missing minute => downtime.
-  Per-day logs show minutes-up/total and the source file.
-- ``POST /backfill/dcp``: DCP/sensor telemetry from the same files, per-day
-  try/except + commit so one corrupt file logs an ERROR and the stream
-  continues.
+  most recent data lands first. Per day it resolves the shared 091 file
+  once, writes CDP connectivity + wide awos_metrics rows with BULK upserts
+  (a handful of statements per day instead of one per minute), and skips
+  minutes already present.
+- Progress is streamed back to the client as SSE lines.
 """
 
 from __future__ import annotations
@@ -19,13 +17,13 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
 from app.core.config import settings
-from app.services.backfill import _group_wide_static, _wide_upsert
 from app.db.session import AsyncSessionLocal
 from app.ingestion.cdp_reader import CdpReader
+from app.ingestion.components import group_wide
 from app.ingestion.parsers import parse_one_minute_file, parse_timestamp_from_filename
 from app.models import AwosMetrics, CdpConnectivity, CdpNode, Sensor, Site
 
@@ -33,7 +31,6 @@ router = APIRouter(prefix="/backfill", tags=["backfill"])
 logger = logging.getLogger(__name__)
 _JOBS: dict[str, dict] = {}
 _job_counter = 0
-
 
 
 def _sse(line: str) -> str:
@@ -60,12 +57,30 @@ def _resolve_day_file(reader, sites, day: datetime):
     return None, None
 
 
+def _bulk_cdp_upsert(rows: list[dict]):
+    ins = insert(CdpConnectivity)
+    return ins.values(rows).on_conflict_do_update(
+        index_elements=["time", "cdp_id"],
+        set_={"reachable": ins.excluded.reachable, "error_message": None},
+    )
+
+
+def _bulk_awos_upsert(rows: list[dict]):
+    """Multi-row wide upsert; normalizes each row to the union of keys."""
+    cols = ["time", "site_id"] + [
+        c for r in rows for c in r if c not in ("time", "site_id")
+    ]
+    cols = list(dict.fromkeys(cols))  # dedupe, preserve order
+    values = [{c: r.get(c) for c in cols} for r in rows]
+    ins = insert(AwosMetrics)
+    return ins.values(values).on_conflict_do_update(
+        index_elements=["time", "site_id"],
+        set_={c: getattr(ins.excluded, c) for c in cols if c not in ("time", "site_id")},
+    )
+
+
 async def _stream_all():
-    """Combined CDP + DCP backfill. For EACH day it resolves the shared
-    091 WIDN file ONCE, then in a SINGLE session writes:
-      - cdp_connectivity (per CDP node up/down for that minute),
-      - awos_metrics wide rows per site (with dedupe: skips minutes already
-        present). Yields a verbose per-day line after commit/close."""
+    """Combined CDP + DCP backfill, one bulk pass per day."""
     async with AsyncSessionLocal() as s0:
         nodes = (await s0.execute(select(CdpNode))).scalars().all()
         sites = (await s0.execute(select(Site))).scalars().all()
@@ -84,20 +99,52 @@ async def _stream_all():
         day_end = min(cur_day + timedelta(days=1), now)
         one_min, src = _resolve_day_file(reader, sites, cur_day)
 
-        # SESSION PER DAY: same file -> both CDP and awos writes.
         async with AsyncSessionLocal() as session:
-            # timestamps present in the file for this day
+            # Parse the shared file ONCE per site into per-site metric groups;
+            # also collect every minute timestamp present (CDP reachability).
             present: set = set()
+            parsed_by_site: dict[str, dict] = {}
             if one_min is not None:
                 try:
-                    for rec in parse_one_minute_file(one_min, {}, cur_day):
-                        present.add(rec.ts.replace(second=0, microsecond=0))
+                    default_ts = parse_timestamp_from_filename(one_min.name) or cur_day
+                    for site in sites:
+                        site_sensors = [x for x in sensors if x.site_id == site.id]
+                        if not site_sensors:
+                            continue
+                        specs = {x.code: {"station": x.station or "04"}
+                                 for x in site_sensors if x.is_enabled}
+                        if not specs:
+                            continue
+                        recs = parse_one_minute_file(one_min, specs, default_ts)
+                        for rec in recs:
+                            present.add(rec.ts.replace(second=0, microsecond=0))
+                        by_code: dict[str, list] = {}
+                        for rec in recs:
+                            for m in rec.metrics:
+                                by_code.setdefault(m.sensor_code, []).append(m)
+                        parsed_by_site[site.slug] = by_code
                 except Exception as exc:  # noqa: BLE001
                     logger.error("DCP backfill parse error %s: %s", src, exc)
+
+            # Minutes already present per site (one DISTINCT query each).
+            existing: dict[str, set] = {}
+            for slug in parsed_by_site:
+                ts_rows = (
+                    await session.execute(
+                        select(AwosMetrics.time).where(
+                            AwosMetrics.site_id == slug,
+                            AwosMetrics.time >= day_start,
+                            AwosMetrics.time < day_end,
+                        )
+                    )
+                ).scalars().all()
+                existing[slug] = {t.replace(second=0, microsecond=0) for t in ts_rows}
+
+            # CDP: bulk connectivity upsert for every minute in the window.
+            cdp_batch: list[dict] = []
             minutes_up = 0
-            total_minutes = max(1, int((day_end-day_start).total_seconds()//60))
+            total_minutes = max(1, int((day_end - day_start).total_seconds() // 60))
             minute = day_end.replace(second=0, microsecond=0)
-            # CDP: per-node connectivity
             while minute > day_start:
                 minute -= timedelta(minutes=1)
                 if minute < target:
@@ -106,48 +153,26 @@ async def _stream_all():
                 if reachable:
                     minutes_up += 1
                 for node in nodes:
-                    await session.execute(
-                        insert(CdpConnectivity)
-                        .values(time=minute, cdp_id=node.id, reachable=reachable, rtt_ms=None)
-                        .on_conflict_do_update(
-                            index_elements=["time", "cdp_id"],
-                            set_={"reachable": reachable, "error_message": None},
-                        )
-                    )
-            # DCP: awos per site, dedupe per minute
+                    cdp_batch.append({"time": minute, "cdp_id": node.id, "reachable": reachable})
+            if cdp_batch:
+                await session.execute(_bulk_cdp_upsert(cdp_batch))
+
+            # DCP: wide awos_metrics per site, skip already-present minutes.
             site_rows: dict[str, int] = {}
             site_skip: dict[str, int] = {}
-            if one_min is not None:
-                default_ts = parse_timestamp_from_filename(one_min.name) or cur_day
-                for site in sites:
-                    site_sensors = [x for x in sensors if x.site_id == site.id]
-                    if not site_sensors:
+            for slug, by_code in parsed_by_site.items():
+                batch = []
+                for r in group_wide(by_code, slug):
+                    rec_min = r["time"]
+                    if rec_min < target or rec_min > day_end:
                         continue
-                    specs = {x.code: {"station": x.station or "04"}
-                             for x in site_sensors if x.is_enabled}
-                    if not specs:
+                    if rec_min in existing.get(slug, set()):
+                        site_skip[slug] = site_skip.get(slug, 0) + 1
                         continue
-                    recs = parse_one_minute_file(one_min, specs, default_ts)
-                    for rec in recs:
-                        rec_min = rec.ts.replace(second=0, microsecond=0)
-                        if rec_min < target or rec_min > day_end:
-                            continue
-                        exists = (await session.execute(
-                            select(func.count()).select_from(AwosMetrics).where(
-                                AwosMetrics.time == rec_min, AwosMetrics.site_id == site.slug
-                            )
-                        )).scalar_one() > 0
-                        if exists:
-                            site_skip[site.slug] = site_skip.get(site.slug, 0) + 1
-                            continue
-                        batch = {}
-                        for mx in rec.metrics:
-                            batch.setdefault(mx.sensor_code, []).append(mx)
-                        for r in _group_wide_static(batch, site.slug):
-                            if r["time"] != rec_min:
-                                continue
-                            await session.execute(_wide_upsert(r))
-                            site_rows[site.slug] = site_rows.get(site.slug, 0) + 1
+                    batch.append(r)
+                    site_rows[slug] = site_rows.get(slug, 0) + 1
+                if batch:
+                    await session.execute(_bulk_awos_upsert(batch))
             await session.commit()
 
         per_site = " ".join(f"{k}={v}" for k, v in sorted(site_rows.items())) or "none"

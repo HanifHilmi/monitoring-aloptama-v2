@@ -92,12 +92,14 @@ def downsample_series(
     """Convenience wrapper for (datetime, value) pairs -> LTTB output.
 
     Output x-axis uses epoch seconds relative to the first sample.
+    Pairs with a ``None`` value are dropped first so NaN never enters the
+    triangle-area math (which would silently corrupt bucket selection).
     """
-    pairs = list(time_values)
+    pairs = [(t, v) for t, v in time_values if v is not None]
     if not pairs:
         return []
 
     t0 = pairs[0][0].timestamp()
     xs = [p[0].timestamp() - t0 for p in pairs]
-    ys = [float(p[1]) if p[1] is not None else float("nan") for p in pairs]
+    ys = [float(p[1]) for p in pairs]
     return lttb_downsample(xs, ys, threshold)

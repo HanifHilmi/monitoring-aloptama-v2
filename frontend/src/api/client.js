@@ -18,11 +18,6 @@ export const api = {
   getCdpConnectivity: (cdpId, hours = 24) =>
     request(`/status/cdp/${cdpId}/connectivity?hours=${hours}`),
 
-  // Telemetry
-  getSiteAvailability: (siteSlug, win) => {
-    const q = new URLSearchParams({ start: win.start, end: win.end })
-    return request(`/telemetry/${siteSlug}/availability?${q.toString()}`)
-  },
   // Wide awos_metrics: fetch several metric columns in one call.
   getWideTelemetry: (siteSlug, aliases = [], win = null, range = 'today') => {
     const q = new URLSearchParams({ range })
@@ -31,14 +26,6 @@ export const api = {
     if (win?.end) q.set('end', win.end)
     return request(`/telemetry/${siteSlug}?${q.toString()}`)
   },
-  getTelemetry: (siteSlug, sensorCode, range = '24h', downsample = 1000, metric, win = null) => {
-    const q = new URLSearchParams({ range, downsample })
-    if (win?.start) q.set('start', win.start)
-    if (win?.end) q.set('end', win.end)
-    if (metric) q.set('metric', metric)
-    return request(`/telemetry/${siteSlug}/${sensorCode}?${q.toString()}`)
-  },
-
   // SLA / OLA (corrected semantics)
   getAvailability: (range = 'month', win = null) => {
     const q = new URLSearchParams({ range })
@@ -54,19 +41,6 @@ export const api = {
   },
   // Downtime map (yearly calendar heatmap)
   getDowntimeMap: (year) => request(`/sla-ola/downtime-map?year=${year}`),
-  // Legacy alias kept for SlaOlaView until migrated
-  getSlaOlaSummary: (range = '30d') =>
-    request(`/sla-ola/summary?range=${range}`),
-  getDailyRollup: (scope, entityType, entityId, days = 30) =>
-    request(
-      `/sla-ola/daily?scope=${scope}&entity_type=${entityType}&entity_id=${entityId}&days=${days}`,
-    ),
-  getDowntimeEvents: (scope = 'ola', siteSlug, sensorCode, limit = 100) => {
-    const params = new URLSearchParams({ scope, limit })
-    if (siteSlug) params.set('site_slug', siteSlug)
-    if (sensorCode) params.set('sensor_code', sensorCode)
-    return request(`/sla-ola/events?${params.toString()}`)
-  },
 
   // System health / connectivity
   getSystemHealth: () => request('/system/health'),

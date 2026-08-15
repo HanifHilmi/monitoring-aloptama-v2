@@ -2,6 +2,10 @@
 
 Returns CDP node reachability, per-site sensor health, and recent
 connectivity samples so dashboards render immediately on load.
+
+Both aggregations run in a single SQL pass per site/node (DISTINCT ON for
+the latest connectivity sample, MAX(time) FILTER per component for sensor
+freshness) — no N+1 queries and no loading raw rows into Python.
 """
 
 from __future__ import annotations
@@ -9,16 +13,22 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.db.session import get_db
 from app.ingestion.components import COMPONENT_COLUMNS
-from app.models import AwosMetrics, CdpConnectivity, CdpNode, Site
+from app.models import CdpConnectivity, CdpNode, Site
 
 router = APIRouter(prefix="/status", tags=["status"])
+
+# component_code -> MAX(time) FILTER (WHERE any of its wide columns is set).
+_COMPONENT_FILTERS: dict[str, str] = {
+    comp: " OR ".join(f"{c} IS NOT NULL" for c in cols)
+    for comp, cols in COMPONENT_COLUMNS.items()
+}
 
 
 @router.get("/overview")
@@ -38,16 +48,24 @@ async def get_status_overview(
         minutes=settings.telemetry_stale_after_minutes + 2
     )
 
+    # Latest connectivity sample per CDP node — one DISTINCT ON query.
+    latest_by_cdp: dict[int, object] = {}
+    if nodes:
+        rows = (
+            await db.execute(
+                text(
+                    "SELECT DISTINCT ON (cdp_id) cdp_id, time, reachable, rtt_ms, error_message "
+                    "FROM cdp_connectivity WHERE cdp_id = ANY(:ids) "
+                    "ORDER BY cdp_id, time DESC"
+                ),
+                {"ids": [n.id for n in nodes]},
+            )
+        ).all()
+        latest_by_cdp = {r.cdp_id: r for r in rows}
+
     node_status = []
     for n in nodes:
-        # Latest connectivity sample per node
-        latest_q = (
-            select(CdpConnectivity)
-            .where(CdpConnectivity.cdp_id == n.id)
-            .order_by(CdpConnectivity.time.desc())
-            .limit(1)
-        )
-        latest = (await db.execute(latest_q)).scalars().first()
+        latest = latest_by_cdp.get(n.id)
         node_status.append(
             {
                 "id": n.id,
@@ -72,29 +90,29 @@ async def get_status_overview(
     for site in sites:
         sensors = []
         active_sensors = [s for s in site.sensors if s.is_enabled]
-        # Decide component status from the WIDE awos_metrics table: a
-        # component is ONLINE only when its OWN columns have a fresh row.
-        site_rows = (
+        # Latest sample per component from the WIDE awos_metrics table —
+        # one scan per site (no 2000-row Python loop).
+        selects = ", ".join(
+            f"MAX(time) FILTER (WHERE {cond}) AS {comp.lower()}"
+            for comp, cond in _COMPONENT_FILTERS.items()
+        )
+        row = (
             await db.execute(
-                select(AwosMetrics)
-                .where(AwosMetrics.site_id == site.slug, AwosMetrics.time >= stale_cutoff)
-                .order_by(AwosMetrics.time.desc())
-                .limit(2000)
+                text(
+                    "SELECT " + selects
+                    + " FROM awos_metrics WHERE site_id = :slug AND time >= :cutoff"
+                ),
+                {"slug": site.slug, "cutoff": stale_cutoff},
             )
-        ).scalars().all()
+        ).one()
+        latest_comp = dict(row._mapping)
 
         for s in active_sensors:
             comp = (s.component or s.code)
             # RWY04 RVR uses alias 'RVR_ALS' - map to canonical
             comp = {'RVR_ALS': 'RVR'}.get(comp, comp)
-            cols = COMPONENT_COLUMNS.get(comp, [])
-            # find the latest row where ANY of this component's columns is set
-            latest_comp = None
-            for r in site_rows:
-                if any(getattr(r, c) is not None for c in cols):
-                    latest_comp = r.time
-                    break
-            online = latest_comp is not None
+            latest = latest_comp.get(comp.lower())
+            online = latest is not None
             sensors.append({
                 "id": s.id,
                 "code": s.code,
@@ -104,7 +122,7 @@ async def get_status_overview(
                 "is_state": s.is_state,
                 "chart_metrics": s.chart_metrics,
                 "status": "ok" if online else "stale",
-                "last_sample_time": latest_comp,
+                "last_sample_time": latest,
             })
         # DCP state: ONLINE when at least ONE OTHER enabled component on
         # this site has fresh data; OFFLINE only when every component is stale.

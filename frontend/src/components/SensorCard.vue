@@ -51,39 +51,14 @@ async function load() {
   if (first) loading.value = true
   error.value = null
   try {
-    // Prefer the WIDE awos_metrics endpoint (one call, wide columns);
-    // fall back to per-metric EAV if it errors (e.g. table not migrated).
-    let merged = {}
-    try {
-      const aliases = chartMetrics.value
-      const wide = await api.getWideTelemetry(props.siteSlug, aliases, liveWin.value, props.range)
-      const cols = aliases.map((a) => WIDE_COL[a] || a)
-      merged = {}
-      for (const m of aliases) merged[m] = []
-      for (const r of wide.samples || []) {
-        for (let i = 0; i < aliases.length; i++) {
-          const v = r[cols[i]]
-          if (typeof v === 'number' && !Number.isNaN(v)) {
-            merged[aliases[i]].push({ time: r.time, value: v })
-          }
-        }
-      }
-      // keep last-known for metrics that returned no new rows
-      for (const m of aliases) if (!merged[m].length && metrics.value[m]) merged[m] = metrics.value[m]
-    } catch {
-      const all = await Promise.all(
-        chartMetrics.value.map(async (m) => {
-          try {
-            const d = await api.getTelemetry(props.siteSlug, props.sensor.code, props.range, 1500, m, liveWin.value)
-            return [m, d.series || d.points || d.samples || []]
-          } catch {
-            return [m, metrics.value[m] || []]
-          }
-        }),
-      )
-      merged = {}
-      for (const [m, pts] of all) merged[m] = pts.length ? pts : (metrics.value[m] || [])
+    const aliases = chartMetrics.value
+    const wide = await api.getWideTelemetry(props.siteSlug, aliases, liveWin.value, props.range)
+    const merged = {}
+    for (const m of aliases) {
+      const col = WIDE_COL[m] || m
+      merged[m] = (wide.series?.[col] || []).map((p) => ({ time: p.time, value: p.value }))
     }
+    for (const m of aliases) if (!merged[m].length && metrics.value[m]) merged[m] = metrics.value[m]
     metrics.value = merged
   } catch (e) {
     error.value = e.message

@@ -1,9 +1,8 @@
-"""Component -> awos_metrics column map + OLA validity helpers.
+"""Component -> awos_metrics column map + wide-row grouping helpers.
 
-OLA = average % of the 21 configured components (7/site x 3 sites) that have
-data at a given minute. A component is VALID when ANY of its wide columns is
-non-NULL for that (time, site). DCP is site-level: ONLINE when any non-DCP
-column on that site is present, OFFLINE only when ALL site columns are NULL.
+A component is VALID when ANY of its wide columns is non-NULL for that
+(time, site). Component availability is computed from awos_metrics with
+SQL ``COUNT(*) FILTER`` aggregates by the API layer.
 """
 from __future__ import annotations
 
@@ -27,26 +26,52 @@ SITE_COMPONENTS: dict[str, list[str]] = {
     "middle": ["ATRH", "BARO", "ANEM", "RAIN", "SOLR", "LIGH"],
 }
 
-TOTAL_COMPONENTS = (len(SITE_COMPONENTS["04"]) + 1) * len(SITE_COMPONENTS)  # 7*3 = 21
+# Wide-row metric alias -> (awos_metrics column, is_text) mapping.
+WIDE_COLUMNS: dict[str, tuple[str, bool]] = {
+    "TEMP": ("temp_c", False), "DEWP": ("dewp_c", False), "RH": ("rh_pct", False),
+    "QNH": ("qnh_hpa", False), "DA": ("da_ft", False),
+    "WS": ("wind_speed_kt", False), "WD": ("wind_dir_deg", False),
+    "WGS": ("gust_speed_kt", False), "WGD": ("gust_dir_deg", False),
+    "RVR": ("rvr_m", False), "VIS": ("vis_m", False), "ALS": ("als_cd", False),
+    "D/N": ("als_dn", True), "RLS": ("rls", False),
+    "LR1": ("lr1_100ft", False), "SKY": ("sky_condition", True),
+    "RA": ("precip_mm", False), "PW": ("present_weather", True),
+    "SOL": ("solar_wm2", False), "LTX": ("lightning", True),
+}
 
 
-def site_components(site_slug: str) -> list[str]:
-    """Return the 7 component codes for a site (6 sensors + DCP)."""
-    return list(SITE_COMPONENTS[site_slug]) + ["DCP"]
-
-
-def wide_row_components(row: dict) -> list[str]:
-    """Return the non-DCP component codes that have data in one wide row."""
-    out = []
-    for code, cols in COMPONENT_COLUMNS.items():
-        if any(row.get(c) is not None for c in cols):
-            out.append(code)
-    return out
-
-
-def row_dcp_online(row: dict) -> bool:
-    """DCP is ONLINE when any non-DCP column on the site is present."""
-    for code, cols in COMPONENT_COLUMNS.items():
-        if any(row.get(c) is not None for c in cols):
-            return True
-    return False
+def group_wide(parsed_by_code: dict, site_id: str) -> list[dict]:
+    """Collapse EAV metrics into one wide row per (minute, site)."""
+    rows: dict = {}
+    for code, metrics in (parsed_by_code or {}).items():
+        for m in metrics or []:
+            if not m.is_valid or m.ts is None:
+                continue
+            col = WIDE_COLUMNS.get(m.metric)
+            if not col:
+                continue
+            column, is_text = col
+            key = m.ts.replace(second=0, microsecond=0)
+            row = rows.setdefault(key, {"time": key, "site_id": site_id})
+            if is_text:
+                # Empty text field = healthy, no event -> empty string.
+                row[column] = (m.text_value or "")
+            else:
+                # Empty numeric field = healthy -> 0. Explicit missing is
+                # skipped above (is_valid False) so the column stays NULL.
+                row[column] = m.value if m.value is not None else 0
+    # WGS/WGD are tied to WS/WD: if wind is missing (///) the sensor is
+    # OFFLINE -> gust = NULL. If wind is ONLINE/valid, gust is 0 when the
+    # WGS/WGD fields are missing or empty (offline WGS/WGD columns parse
+    # to None and are skipped above, so default them to 0 here).
+    for row in rows.values():
+        wind_ok = row.get("wind_speed_kt") is not None and row.get("wind_dir_deg") is not None
+        if not wind_ok:
+            row["gust_speed_kt"] = None
+            row["gust_dir_deg"] = None
+        else:
+            if row.get("gust_speed_kt") is None:
+                row["gust_speed_kt"] = 0
+            if row.get("gust_dir_deg") is None:
+                row["gust_dir_deg"] = 0
+    return list(rows.values())

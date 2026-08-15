@@ -60,6 +60,7 @@ export function buildTimeSeriesOption({ times, series, unit = '', color = '#38bd
     series: [
       {
         type: 'line',
+        sampling: 'lttb',
         data: shifted.map((t, i) => [t, series[i]]),
         showSymbol: false,
         lineStyle: { width: 1.5, color },
@@ -111,6 +112,7 @@ export function buildDualAxisOption({ left, right, leftName = '', rightName = ''
       {
         name: leftName,
         type: 'line',
+        sampling: 'lttb',
         data: left.map((p) => [shift(p.time), p.value]),
         showSymbol: false,
         lineStyle: { width: 1.5, color: '#38bdf8' },
@@ -119,6 +121,7 @@ export function buildDualAxisOption({ left, right, leftName = '', rightName = ''
       {
         name: rightName,
         type: 'line',
+        sampling: 'lttb',
         yAxisIndex: 1,
         data: right.map((p) => [shift(p.time), p.value]),
         showSymbol: false,
