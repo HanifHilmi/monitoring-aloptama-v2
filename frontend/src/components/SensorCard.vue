@@ -181,7 +181,9 @@ const stringCharts = computed(() => {
     if (!d) continue
     const transitions = d.transitions || []
     const counts = d.counts || []
-    if (!transitions.length && !counts.length) continue
+    const hasValues = counts.length > 0 ||
+      transitions.some((t) => t.value && t.value !== '')
+    if (!hasValues) continue
     let option
     let height
     if (WIDE_COL[m] === 'als_dn' && transitions.length) {
