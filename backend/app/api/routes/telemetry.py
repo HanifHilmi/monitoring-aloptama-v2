@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -110,13 +110,39 @@ async def get_wide_telemetry(
 
     valid = {c.name for c in AwosMetrics.__table__.columns if c.name not in ("time", "site_id", "raw_line")}
     cols = [c for c in cols if c in valid]
+    if not cols:
+        return {
+            "site": site_slug, "metrics": [], "count": 0, "series": {},
+            "range": range, "start": s_dt, "end": e_dt, "downsampled": False,
+        }
 
-    stmt = (
-        select(AwosMetrics)
+    # LTTB when the window exceeds 1 day (or downsample explicitly given).
+    window = e_dt - s_dt
+    do_downsample = downsample is not None or window > timedelta(days=1)
+    threshold = downsample or settings.lttb_default_threshold
+
+    # Fetch ONLY the requested columns as light tuples (not ORM objects), and
+    # decimate in SQL when the window would yield far more minutes than the
+    # LTTB threshold: pick the LATEST row per time_bucket so Python never
+    # processes more than ~2x threshold points, no matter the window size.
+    window_seconds = max(1, int(window.total_seconds()))
+    bucket_minutes = None
+    if window_seconds // 60 > threshold * 2:
+        bucket_minutes = max(1, window_seconds // 60 // (threshold * 2))
+
+    col_exprs = [getattr(AwosMetrics, c) for c in cols]
+    base = (
+        select(AwosMetrics.time, *col_exprs)
         .where(AwosMetrics.site_id == site_slug, AwosMetrics.time >= s_dt, AwosMetrics.time <= e_dt)
-        .order_by(AwosMetrics.time.asc())
     )
-    rows = (await db.execute(stmt)).scalars().all()
+    if bucket_minutes:
+        bucket_expr = func.time_bucket(timedelta(minutes=bucket_minutes), AwosMetrics.time)
+        stmt = base.distinct(bucket_expr).order_by(bucket_expr, AwosMetrics.time.desc())
+    else:
+        stmt = base.order_by(AwosMetrics.time.asc())
+    rows = (await db.execute(stmt)).all()
+    if bucket_minutes:
+        rows = sorted(rows, key=lambda r: r[0])  # LTTB needs ascending time
 
     # Group values per requested column: [(datetime, value), ...].
     # Only numeric columns produce a series — TEXT columns (present_weather,
@@ -124,15 +150,10 @@ async def get_wide_telemetry(
     # like 'NCD' and never plotted by the frontend).
     per_col: dict[str, list] = {c: [] for c in cols}
     for r in rows:
-        for c in cols:
-            v = getattr(r, c, None)
+        for i, c in enumerate(cols):
+            v = r[i + 1]
             if isinstance(v, (int, float)) and not isinstance(v, bool):
-                per_col[c].append((r.time, float(v)))
-
-    # LTTB when the window exceeds 1 day (or downsample explicitly given).
-    window = e_dt - s_dt
-    do_downsample = downsample is not None or window > timedelta(days=1)
-    threshold = downsample or settings.lttb_default_threshold
+                per_col[c].append((r[0], float(v)))
 
     series: dict[str, list[dict]] = {}
     downsampled = 0
