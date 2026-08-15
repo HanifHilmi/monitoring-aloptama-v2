@@ -181,11 +181,9 @@ const stringCharts = computed(() => {
     if (!d) continue
     const transitions = d.transitions || []
     const counts = d.counts || []
-    const hasValues = counts.length > 0 ||
-      transitions.some((t) => t.value && t.value !== '')
-    if (!hasValues) continue
     let option
     let height
+
     if (WIDE_COL[m] === 'als_dn' && transitions.length) {
       option = buildStringStateOption({
         transitions,
@@ -195,19 +193,31 @@ const stringCharts = computed(() => {
       })
       height = '104px'
     } else {
-      // Present Weather: when exactly ONE code occurred in the window, fold
-      // the clear minutes into an 'NSW' (No Significant Weather) bar so the
-      // chart reads "mostly clear + one event". With >=2 codes NSW would
+      // PW: fold the clear minutes into an 'NSW' (No Significant Weather)
+      // bar when 0 or 1 weather code occurred; with >=2 codes NSW would
       // dominate, so it is omitted. DB data is left untouched.
       let effectiveCounts = counts
-      if (WIDE_COL[m] === 'present_weather' && counts.length === 1) {
+      if (WIDE_COL[m] === 'present_weather') {
         const totalMin = Math.max(
           0,
           Math.round((new Date(win.end || Date.now()) - new Date(win.start || 0)) / 60000),
         )
-        const nsw = Math.max(0, totalMin - counts.reduce((s, x) => s + x.count, 0))
-        if (nsw > 0) effectiveCounts = [...counts, { value: 'NSW', count: nsw }]
+        const sum = counts.reduce((s, x) => s + x.count, 0)
+        if (counts.length === 0) {
+          effectiveCounts = [{ value: 'NSW', count: totalMin }]
+        } else if (counts.length === 1) {
+          const nsw = Math.max(0, totalMin - sum)
+          if (nsw > 0) effectiveCounts = [...counts, { value: 'NSW', count: nsw }]
+        }
       }
+      // SKY: 'NCD' (No Clouds Detected) is the clear-sky equivalent of NSW —
+      // drop it when >=2 cloud states occurred so it never dominates.
+      if (WIDE_COL[m] === 'sky_condition') {
+        const nonNcd = counts.filter((c) => c.value !== 'NCD')
+        if (nonNcd.length >= 2) effectiveCounts = nonNcd
+      }
+
+      if (!effectiveCounts.length || effectiveCounts.every((c) => c.count <= 0)) continue
       const bars = Math.min(effectiveCounts.length, 8) + (effectiveCounts.length > 8 ? 1 : 0)
       option = buildStringHistogramOption({ counts: effectiveCounts, name: m })
       height = `${48 + bars * 18}px`
