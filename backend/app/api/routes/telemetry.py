@@ -119,11 +119,14 @@ async def get_wide_telemetry(
     rows = (await db.execute(stmt)).scalars().all()
 
     # Group values per requested column: [(datetime, value), ...].
+    # Only numeric columns produce a series — TEXT columns (present_weather,
+    # sky_condition, als_dn, lightning) are skipped (their values are strings
+    # like 'NCD' and never plotted by the frontend).
     per_col: dict[str, list] = {c: [] for c in cols}
     for r in rows:
         for c in cols:
             v = getattr(r, c, None)
-            if v is not None:
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
                 per_col[c].append((r.time, float(v)))
 
     # LTTB when the window exceeds 1 day (or downsample explicitly given).
