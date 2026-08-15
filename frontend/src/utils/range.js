@@ -1,15 +1,15 @@
 // Shared time-range model. All timestamps computed in UTC.
 
 export const PRESETS = [
-  { key: '15m', label: '15m' },
-  { key: '30m', label: '30m' },
-  { key: '1h', label: '1h' },
-  { key: '3h', label: '3h' },
-  { key: '6h', label: '6h' },
-  { key: '12h', label: '12h' },
-  { key: '24h', label: '24h' },
-  { key: '3d', label: '3d' },
-  { key: '7d', label: '7d' },
+  { key: '15m', label: '15 minutes' },
+  { key: '30m', label: '30 minutes' },
+  { key: '1h', label: '1 hour' },
+  { key: '3h', label: '3 hours' },
+  { key: '6h', label: '6 hours' },
+  { key: '12h', label: '12 hours' },
+  { key: '24h', label: '24 hours' },
+  { key: '3d', label: '3 days' },
+  { key: '7d', label: '7 days' },
 ]
 
 export const MAX_RANGE_MS = 30 * 24 * 3600 * 1000 // 30 days max custom range
@@ -52,21 +52,14 @@ export function clampCustom(startIso, endIso) {
   return { start: startIso, end: endIso }
 }
 
-// datetime-local value ("YYYY-MM-DDTHH:MM") -> UTC ISO string. The app is
-// always UTC, so the typed wall-clock is interpreted as UTC (no device shift).
-export function toUtcIsoFromLocal(local) {
-  if (!local) return null
-  const d = new Date(`${local}:00Z`)
-  return Number.isNaN(d.getTime()) ? null : d.toISOString()
-}
-
-// UTC ISO string -> datetime-local value ("YYYY-MM-DDTHH:MM") for prefill.
-export function toLocalInput(iso) {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  const pad = (n) => String(n).padStart(2, '0')
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`
+// Combine a 'YYYY-MM-DD' date with a 24-hour 'HH:mm' time into a UTC ISO
+// string. The app is always UTC, so the wall-clock is interpreted as UTC.
+export function combineUtc(dateStr, timeStr) {
+  if (!dateStr || !timeStr) return null
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const [hh, mm] = timeStr.split(':').map(Number)
+  if ([y, m, d, hh, mm].some((x) => Number.isNaN(x))) return null
+  return new Date(Date.UTC(y, m - 1, d, hh, mm))
 }
 
 // Normalize every picker value to { key, startIso, endIso }.
