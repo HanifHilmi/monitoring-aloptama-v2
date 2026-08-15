@@ -47,7 +47,7 @@
 ## INSTALLED SKILLS & MCP TOOLS
 
 - **Find Skills**: `@skills/find-skills` — Search and dynamic discovery of open-source skill modules.
-- **UI Testing**: `@skills/playwright-cli` — Headless browser interaction and CLI-based UI screenshot verification. Run it via npx when available (`npx playwright cli ...`, or `npx --no-install playwright cli ...`); only install globally (`npm install -g @playwright/cli@latest`) if npx is unavailable.
+- **UI Testing**: `@skills/playwright-cli` — Headless browser interaction and CLI-based UI screenshot verification. Run it via npx when available (`npx playwright cli ...`, or `npx --no-install playwright cli ...`); only install globally (`npm install -g @playwright/cli@latest`) if npx is unavailable. The CLI launches Chrome (chrome-for-testing), which needs GTK/ATK system libs (e.g. `libatk-1.0.so.0`); on a bare host install them first with `npx playwright install chromium` and `npx playwright install-deps` (sudo required).
 - **Charts & Data Visualization**: `@skills/chart-designer` — Best practices for Apache ECharts and interactive telemetry graphs.
 - **Backend Architecture**: `@skills/fastapi` — Standard async patterns, router design, and FastAPI optimizations.
 - **Frontend Standards**: `@skills/vue-best-practices` & `@skills/frontend-design` — Vue 3 Composition API patterns and Tailwind CSS layouts.
