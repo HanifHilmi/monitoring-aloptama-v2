@@ -52,6 +52,90 @@ WIDE_ALIAS = {
 # awos_metrics columns that hold TEXT values (categorical, not numeric).
 _TEXT_COLUMNS = {"als_dn", "sky_condition", "present_weather", "lightning"}
 
+# Columns used for the wind summary (wind rose + gust stats).
+_WIND_COLUMNS = {"wind_speed_kt", "wind_dir_deg", "gust_speed_kt", "gust_dir_deg"}
+
+# Wind rose speed categories (kt).
+_WIND_CATEGORIES = ("calm", "light", "moderate", "strong", "gale")
+
+
+async def _compute_wind(db: AsyncSession, slug: str, s_dt: datetime, e_dt: datetime) -> dict:
+    """Wind summary over the raw 1-minute data (independent of LTTB).
+
+    - windrose: minutes per 16 direction sectors x 5 speed categories.
+    - max/min sustained wind speed.
+    - gust events (gust_speed_kt > 0): count, max, and direction at the max.
+    """
+    rows = (
+        await db.execute(
+            text(
+                "SELECT sector, "
+                "COUNT(*) FILTER (WHERE speed < 1) AS calm, "
+                "COUNT(*) FILTER (WHERE speed >= 1 AND speed < 10) AS light, "
+                "COUNT(*) FILTER (WHERE speed >= 10 AND speed < 20) AS moderate, "
+                "COUNT(*) FILTER (WHERE speed >= 20 AND speed < 30) AS strong, "
+                "COUNT(*) FILTER (WHERE speed >= 30) AS gale "
+                "FROM ("
+                "  SELECT (floor(wind_dir_deg / 22.5)::int % 16) AS sector, "
+                "         wind_speed_kt AS speed "
+                "  FROM awos_metrics "
+                "  WHERE site_id = :slug AND time >= :s AND time <= :e "
+                "    AND wind_dir_deg IS NOT NULL AND wind_speed_kt IS NOT NULL"
+                ") x GROUP BY sector ORDER BY sector"
+            ),
+            {"slug": slug, "s": s_dt, "e": e_dt},
+        )
+    ).all()
+    windrose = [
+        {"sector": i, "calm": 0, "light": 0, "moderate": 0, "strong": 0, "gale": 0}
+        for i in range(16)
+    ]
+    for r in rows:
+        windrose[r[0]] = {
+            "sector": r[0], "calm": r[1], "light": r[2],
+            "moderate": r[3], "strong": r[4], "gale": r[5],
+        }
+
+    speed = (
+        await db.execute(
+            text(
+                "SELECT MAX(wind_speed_kt), MIN(wind_speed_kt) FROM awos_metrics "
+                "WHERE site_id = :slug AND time >= :s AND time <= :e "
+                "AND wind_speed_kt IS NOT NULL"
+            ),
+            {"slug": slug, "s": s_dt, "e": e_dt},
+        )
+    ).one()
+
+    gust_cnt = gust.cnt or 0
+    gust_max = None
+    gust_dir = None
+    if gust_cnt > 0:
+        gust_max = gust.mx
+        gd = (
+            await db.execute(
+                text(
+                    "SELECT gust_dir_deg FROM awos_metrics "
+                    "WHERE site_id = :slug AND time >= :s AND time <= :e "
+                    "AND gust_speed_kt IS NOT NULL "
+                    "ORDER BY gust_speed_kt DESC, time ASC LIMIT 1"
+                ),
+                {"slug": slug, "s": s_dt, "e": e_dt},
+            )
+        ).one()
+        gust_dir = gd[0]
+
+    return {
+        "windrose": windrose,
+        "max_speed_kt": speed[0],
+        "min_speed_kt": speed[1],
+        "gust": {
+            "count": gust_cnt,
+            "max_speed_kt": gust_max,
+            "direction_deg": gust_dir,
+        },
+    }
+
 
 def _parse_dt(v: str | None):
     if not v:
@@ -116,7 +200,7 @@ async def get_wide_telemetry(
     if not cols:
         return {
             "site": site_slug, "metrics": [], "count": 0, "series": {},
-            "textSeries": {}, "textCounts": {},
+            "textSeries": {}, "textCounts": {}, "wind": None,
             "range": range, "start": s_dt, "end": e_dt, "downsampled": False,
         }
 
@@ -211,6 +295,12 @@ async def get_wide_telemetry(
         ).all()
         text_counts[c] = [{"value": v, "count": n} for v, n in cnt]
 
+    # Wind summary (ANEM wind rose + gust stats) from raw data when wind
+    # columns are requested.
+    wind = None
+    if _WIND_COLUMNS.intersection(cols):
+        wind = await _compute_wind(db, site_slug, s_dt, e_dt)
+
     return {
         "site": site_slug,
         "metrics": cols,
@@ -218,6 +308,7 @@ async def get_wide_telemetry(
         "series": series,
         "textSeries": text_series,
         "textCounts": text_counts,
+        "wind": wind,
         "range": range,
         "start": s_dt,
         "end": e_dt,

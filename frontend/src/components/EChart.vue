@@ -4,6 +4,7 @@ import { LineChart, BarChart, ScatterChart, HeatmapChart } from 'echarts/charts'
 import {
   GridComponent, TooltipComponent, TitleComponent, LegendComponent,
   VisualMapComponent, CalendarComponent, MarkAreaComponent,
+  PolarComponent,
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -12,6 +13,7 @@ use([
   LineChart, BarChart, ScatterChart, HeatmapChart,
   GridComponent, TooltipComponent, TitleComponent, LegendComponent,
   VisualMapComponent, CalendarComponent, MarkAreaComponent,
+  PolarComponent,
   CanvasRenderer,
 ])
 

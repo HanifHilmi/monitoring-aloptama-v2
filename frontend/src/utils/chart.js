@@ -288,6 +288,66 @@ export function buildStringStateOption({ transitions, startIso, endIso, name = '
   }
 }
 
+// Wind rose: polar stacked bar showing, per 16-direction sector, the minutes
+// split into speed bands. windrose = [{sector 0..15, calm, light, moderate,
+// strong, gale}].
+export function buildWindRoseOption({ windrose }) {
+  const DIRECTIONS = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW']
+  const CATS = [
+    { key: 'calm', label: 'Calm <1', color: '#64748b' },
+    { key: 'light', label: '1–9', color: '#38bdf8' },
+    { key: 'moderate', label: '10–19', color: '#34d399' },
+    { key: 'strong', label: '20–29', color: '#fbbf24' },
+    { key: 'gale', label: '≥30', color: '#f472b6' },
+  ]
+  const data = windrose || []
+  const maxRadius = Math.max(1, ...data.map((r) => CATS.reduce((s, c) => s + (r[c.key] || 0), 0)))
+
+  return {
+    animation: true,
+    animationDuration: 400,
+    polar: {},
+    legend: {
+      bottom: 0,
+      textStyle: { color: '#94a3b8', fontSize: 10 },
+      itemWidth: 10,
+      itemHeight: 8,
+      data: CATS.map((c) => c.label),
+    },
+    tooltip: {
+      trigger: 'item',
+      backgroundColor: '#0b1220',
+      borderColor: '#1e2a45',
+      textStyle: { color: '#e2e8f0', fontSize: 11 },
+      formatter: (params) => `${params.name} · ${params.seriesName}: <b>${params.value}</b> min`,
+    },
+    angleAxis: {
+      type: 'category',
+      data: DIRECTIONS,
+      startAngle: 90,
+      boundaryGap: false,
+      axisLine: { lineStyle: { color: AXIS_COLOR } },
+      axisTick: { show: false },
+      axisLabel: { color: AXIS_COLOR, fontSize: 9 },
+      splitLine: { lineStyle: { color: SPLIT_COLOR } },
+    },
+    radiusAxis: {
+      min: 0,
+      max: maxRadius,
+      axisLabel: { show: false },
+      splitLine: { lineStyle: { color: SPLIT_COLOR } },
+    },
+    series: CATS.map((c) => ({
+      name: c.label,
+      type: 'bar',
+      coordinateSystem: 'polar',
+      stack: 'wind',
+      data: data.map((r) => r[c.key] || 0),
+      itemStyle: { color: c.color },
+    })),
+  }
+}
+
 // Histogram of minutes-per-value for high-cardinality string data (weather
 // codes, cloud layers, lightning). Top 8 values + "other".
 export function buildStringHistogramOption({ counts, name = '' }) {

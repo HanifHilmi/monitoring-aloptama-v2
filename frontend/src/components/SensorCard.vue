@@ -2,7 +2,7 @@
 import { api } from '@/api/client'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import EChart from '@/components/EChart.vue'
-import { buildStringStateOption, buildStringHistogramOption } from '@/utils/chart'
+import { buildStringStateOption, buildStringHistogramOption, buildWindRoseOption } from '@/utils/chart'
 
 const props = defineProps({
   sensor: { type: Object, required: true },
@@ -81,6 +81,7 @@ async function load() {
       }
     }
     if (Object.keys(td).length) textData.value = td
+    if (isAnem.value) wind.value = wide.wind || null
   } catch (e) {
     error.value = e.message
   } finally {
@@ -238,17 +239,34 @@ const noDataNote = computed(() => {
   return 'No data recorded in this period.'
 })
 
-// Wind gust stats for ANEM (WGS max + its direction in range).
-const gustStats = computed(() => {
-  if (props.sensor.code !== 'ANEM') return null
-  const wgs = metrics.value['WGS'] || []
-  const wgd = metrics.value['WGD'] || []
-  if (!wgs.length) return null
-  let max = -Infinity, at = null
-  for (const p of wgs) if (p.value != null && p.value > max) { max = p.value; at = p }
-  const d = at ? (wgd.find((q) => q.time === at.time) || {}).value : null
-  return { max, direction: d, count: wgs.filter((p) => p.value != null && p.value > 0).length }
+// ---- Anemometer: wind rose + wind stats (from the backend `wind` summary) ----
+const isAnem = computed(() => props.sensor.code === 'ANEM')
+const wind = ref(null)
+
+const windStats = computed(() => {
+  if (!isAnem.value || !wind.value) return null
+  return {
+    maxSpeed: wind.value.max_speed_kt,
+    minSpeed: wind.value.min_speed_kt,
+    gust: wind.value.gust || {},
+  }
 })
+
+const windroseOption = computed(() => {
+  if (!isAnem.value || !wind.value) return null
+  return buildWindRoseOption({ windrose: wind.value.windrose })
+})
+
+function fmtNum(v, unit = '') {
+  return v == null || Number.isNaN(Number(v)) ? '—' : `${Number(v).toFixed(1)}${unit}`
+}
+
+function fmtDir(deg) {
+  if (deg == null || Number.isNaN(Number(deg))) return '—'
+  const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
+  const idx = Math.round((Number(deg) % 360) / 22.5) % 16
+  return `${dirs[idx]} (${Math.round(Number(deg))}°)`
+}
 
 watch(() => [props.range, props.sensor.id, props.win?.start, props.win?.end], () => {
   if (props.win) liveWin.value = { ...props.win }
@@ -297,22 +315,6 @@ onBeforeUnmount(() => clearInterval(pollTimer))
       <span class="text-slate-500">Online when ≥1 component has data (not ////)</span>
     </div>
 
-    <!-- Wind gust stats above ANEM graph -->
-    <div v-else-if="gustStats" class="mb-2 grid grid-cols-3 gap-2 text-xs">
-      <div class="rounded bg-runway-dark px-2 py-1">
-        <div class="text-slate-500">Gust Count</div>
-        <div class="font-semibold text-slate-200">{{ gustStats.count }}</div>
-      </div>
-      <div class="rounded bg-runway-dark px-2 py-1">
-        <div class="text-slate-500">Max Speed</div>
-        <div class="font-semibold text-slate-200">{{ gustStats.max }} kt</div>
-      </div>
-      <div class="rounded bg-runway-dark px-2 py-1">
-        <div class="text-slate-500">Gust Direction</div>
-        <div class="font-semibold text-slate-200">{{ gustStats.direction ?? '—' }}°</div>
-      </div>
-    </div>
-
     <!-- Charts -->
     <div>
       <div v-if="loading && !hasData()" class="py-10 text-center text-xs text-slate-500">Loading…</div>
@@ -329,6 +331,36 @@ onBeforeUnmount(() => clearInterval(pollTimer))
 
         <div v-if="noDataNote" class="py-10 text-center text-xs text-slate-500">{{ noDataNote }}</div>
         <div v-else-if="!numericMetrics.length && !stringMetrics.length && !isState" class="py-10 text-center text-xs text-slate-500">No chart configured</div>
+
+        <!-- Anemometer: wind rose + wind stats below the wind graph -->
+        <div v-if="windStats" class="mt-3 grid gap-2 lg:grid-cols-3">
+          <div class="lg:col-span-2 rounded bg-runway-dark p-2">
+            <div class="mb-1 text-[10px] uppercase tracking-wide text-slate-500">Wind Rose</div>
+            <EChart v-if="windroseOption" :option="windroseOption" height="230px" />
+          </div>
+          <div class="flex flex-col gap-2 text-xs">
+            <div class="rounded bg-runway-dark px-2 py-1.5">
+              <div class="text-[10px] uppercase tracking-wide text-slate-500">Max Speed</div>
+              <div class="font-semibold text-slate-200">{{ fmtNum(windStats.maxSpeed, ' kt') }}</div>
+            </div>
+            <div class="rounded bg-runway-dark px-2 py-1.5">
+              <div class="text-[10px] uppercase tracking-wide text-slate-500">Min Speed</div>
+              <div class="font-semibold text-slate-200">{{ fmtNum(windStats.minSpeed, ' kt') }}</div>
+            </div>
+            <div class="rounded bg-runway-dark px-2 py-1.5">
+              <div class="text-[10px] uppercase tracking-wide text-slate-500">Gust Events</div>
+              <div class="font-semibold text-slate-200">{{ windStats.gust.count ?? 0 }}</div>
+            </div>
+            <div class="rounded bg-runway-dark px-2 py-1.5">
+              <div class="text-[10px] uppercase tracking-wide text-slate-500">Max Gust</div>
+              <div class="font-semibold text-slate-200">{{ fmtNum(windStats.gust.max_speed_kt, ' kt') }}</div>
+            </div>
+            <div class="rounded bg-runway-dark px-2 py-1.5">
+              <div class="text-[10px] uppercase tracking-wide text-slate-500">Gust Dir</div>
+              <div class="font-semibold text-slate-200">{{ fmtDir(windStats.gust.direction_deg) }}</div>
+            </div>
+          </div>
+        </div>
       </template>
     </div>
   </div>
