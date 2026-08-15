@@ -1,18 +1,18 @@
 // Shared time-range model. All timestamps computed in UTC.
 
 export const PRESETS = [
-  { key: '15m', label: '15 Minutes' },
-  { key: '30m', label: '30 Minutes' },
-  { key: '1h', label: '1 Hour' },
-  { key: '3h', label: '3 Hours' },
-  { key: '12h', label: '12 Hours' },
-  { key: 'today', label: 'Today' },
-  { key: '3d', label: '3 Days Ago' },
-  { key: 'week', label: 'This Week' },
-  { key: 'month', label: 'This Month' },
+  { key: '15m', label: '15m' },
+  { key: '30m', label: '30m' },
+  { key: '1h', label: '1h' },
+  { key: '3h', label: '3h' },
+  { key: '6h', label: '6h' },
+  { key: '12h', label: '12h' },
+  { key: '24h', label: '24h' },
+  { key: '3d', label: '3d' },
+  { key: '7d', label: '7d' },
 ]
 
-export const MAX_RANGE_MS = 31 * 24 * 3600 * 1000 // 1 month max
+export const MAX_RANGE_MS = 30 * 24 * 3600 * 1000 // 30 days max custom range
 
 export function presetWindow(key) {
   const now = new Date()
@@ -23,7 +23,7 @@ export function presetWindow(key) {
   const MIN = 60 * 1000
   const HOUR = 60 * MIN
   const DAY = 24 * HOUR
-  const mins = { '15m': 15, '30m': 30, '1h': 60, '3h': 180, '12h': 720 }[key]
+  const mins = { '15m': 15, '30m': 30, '1h': 60, '3h': 180, '6h': 360, '12h': 720, '24h': 1440 }[key]
   if (mins != null) {
     return {
       start: new Date(now.getTime() - mins * MIN).toISOString(),
@@ -31,7 +31,7 @@ export function presetWindow(key) {
       key,
     }
   }
-  const days = key === '3d' ? 3 : key === 'week' ? 7 : 30
+  const days = { '3d': 3, '7d': 7, week: 7, month: 30 }[key] ?? 30
   return {
     start: new Date(now.getTime() - days * DAY).toISOString(),
     end: now.toISOString(),

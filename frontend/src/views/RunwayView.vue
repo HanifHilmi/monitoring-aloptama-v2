@@ -11,7 +11,7 @@ const props = defineProps({
 
 const overview = ref(null)
 const timer = ref(null)
-const range = ref({ key: '24h', start: new Date(Date.now() - 24*3600*1000).toISOString(), end: new Date().toISOString() })  // unified window
+const range = ref({ key: '3h', start: new Date(Date.now() - 3*3600*1000).toISOString(), end: new Date().toISOString() })  // unified window
 const site = computed(() =>
   (overview.value?.sites || []).find((s) => s.slug === props.siteSlug),
 )
