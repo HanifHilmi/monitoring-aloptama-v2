@@ -12,7 +12,7 @@ export const PRESETS = [
   { key: '7d', label: '7 days' },
 ]
 
-export const MAX_RANGE_MS = 30 * 24 * 3600 * 1000 // 30 days max custom range
+export const MAX_RANGE_MS = 31 * 24 * 3600 * 1000 // 31 days max custom range
 
 export function presetWindow(key) {
   const now = new Date()

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { PRESETS, presetWindow, combineUtc } from '@/utils/range'
+import { PRESETS, presetWindow, combineUtc, MAX_RANGE_MS } from '@/utils/range'
 
 const props = defineProps({
   // { key, start, end } (ISO)
@@ -10,7 +10,7 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue'])
 
 const pad = (n) => String(n).padStart(2, '0')
-const MAX_MS = 30 * 24 * 3600 * 1000
+const MAX_MS = MAX_RANGE_MS
 const WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December']
@@ -84,7 +84,7 @@ function syncCustom() {
     eMs = sMs + MAX_MS
     customEndDate.value = new Date(eMs).toISOString().slice(0, 10)
     customEndTime.value = new Date(eMs).toISOString().slice(11, 16)
-    customMsg.value = 'Range capped to 30 days.'
+    customMsg.value = 'Range capped to 31 days.'
   } else {
     customMsg.value = ''
   }
@@ -146,7 +146,7 @@ function pickCalDay(d) {
   const eMs = Date.parse(`${e}T00:00:00Z`)
   if (eMs - Date.parse(`${s}T00:00:00Z`) > MAX_MS) {
     e = new Date(Date.parse(`${s}T00:00:00Z`) + MAX_MS).toISOString().slice(0, 10)
-    customMsg.value = 'Range capped to 30 days.'
+    customMsg.value = 'Range capped to 31 days.'
   }
   selStart.value = s
   selEnd.value = e
@@ -256,7 +256,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMouseDown))
             >{{ d }}</button>
           </div>
           <div class="mt-1 border-t border-runway-border pt-1 text-[10px] text-slate-500">
-            Pick From then To (max 30 days)
+            Pick From then To (max 31 days)
           </div>
         </template>
       </div>
