@@ -52,6 +52,23 @@ export function clampCustom(startIso, endIso) {
   return { start: startIso, end: endIso }
 }
 
+// datetime-local value ("YYYY-MM-DDTHH:MM") -> UTC ISO string. The app is
+// always UTC, so the typed wall-clock is interpreted as UTC (no device shift).
+export function toUtcIsoFromLocal(local) {
+  if (!local) return null
+  const d = new Date(`${local}:00Z`)
+  return Number.isNaN(d.getTime()) ? null : d.toISOString()
+}
+
+// UTC ISO string -> datetime-local value ("YYYY-MM-DDTHH:MM") for prefill.
+export function toLocalInput(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`
+}
+
 // Normalize every picker value to { key, startIso, endIso }.
 export function normalizeRange(value) {
   if (value && typeof value === 'object' && value.start && value.end) {

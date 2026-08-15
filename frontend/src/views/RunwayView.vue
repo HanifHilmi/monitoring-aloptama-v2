@@ -81,7 +81,6 @@ onUnmounted(() => clearInterval(timer.value))
         <div class="mb-2 flex items-center justify-between">
           <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">Sensors</h2>
           <RangePicker v-model="range" />
-          <span class="text-[10px] text-slate-500">← range for sensor graphs</span>
         </div>
         <div class="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
           <SensorCard

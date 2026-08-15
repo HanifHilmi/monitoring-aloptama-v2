@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { PRESETS, presetWindow, clampCustom } from '@/utils/range'
+import { PRESETS, presetWindow, toUtcIsoFromLocal, toLocalInput } from '@/utils/range'
 
 const props = defineProps({
   // { key, start, end } (ISO)
@@ -12,9 +12,10 @@ const emit = defineEmits(['update:modelValue'])
 const root = ref(null)
 const open = ref(false)
 const mode = ref(props.modelValue?.key || '3h')
-const customStart = ref((props.modelValue?.start || presetWindow('3h').start).slice(0, 10))
-const customEnd = ref((props.modelValue?.end || presetWindow('3h').end).slice(0, 10))
-const todayIso = new Date().toISOString().slice(0, 10)
+const customStart = ref(toLocalInput(props.modelValue?.start || presetWindow('3h').start))
+const customEnd = ref(toLocalInput(props.modelValue?.end || presetWindow('3h').end))
+const customMsg = ref('')
+const todayInput = new Date().toISOString().slice(0, 16)
 
 const label = computed(() => {
   if (mode.value === 'custom') return 'Custom'
@@ -30,11 +31,31 @@ function applyPreset(key) {
 }
 
 function applyCustom() {
-  const start = new Date(`${customStart.value}T00:00:00Z`).toISOString()
-  const end = new Date(`${customEnd.value}T23:59:59Z`).toISOString()
-  const c = clampCustom(start, end)
-  const normalized = { key: 'custom', ...c }
-  emit('update:modelValue', normalized)
+  const s = toUtcIsoFromLocal(customStart.value)
+  const e = toUtcIsoFromLocal(customEnd.value)
+  if (!s || !e) {
+    customMsg.value = 'Select both a From and To time.'
+    return
+  }
+  const sMs = Date.parse(s)
+  let eMs = Date.parse(e)
+  if (eMs <= sMs) {
+    customMsg.value = 'To must be after From.'
+    return
+  }
+  const MAX = 30 * 24 * 3600 * 1000
+  if (eMs - sMs > MAX) {
+    eMs = sMs + MAX
+    customEnd.value = toLocalInput(new Date(eMs).toISOString())
+    customMsg.value = 'Range capped to 30 days.'
+  } else {
+    customMsg.value = ''
+  }
+  emit('update:modelValue', {
+    key: 'custom',
+    start: new Date(sMs).toISOString(),
+    end: new Date(eMs).toISOString(),
+  })
   mode.value = 'custom'
   open.value = false
 }
@@ -42,8 +63,8 @@ function applyCustom() {
 watch(() => props.modelValue, (v) => {
   if (!v) return
   if (v.key && v.key !== 'custom') mode.value = v.key
-  if (v.start) customStart.value = v.start.slice(0, 10)
-  if (v.end) customEnd.value = v.end.slice(0, 10)
+  if (v.start) customStart.value = toLocalInput(v.start)
+  if (v.end) customEnd.value = toLocalInput(v.end)
 }, { deep: true })
 
 function onDocMouseDown(e) {
@@ -63,37 +84,47 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMouseDown))
     </button>
     <div
       v-if="open"
-      class="absolute right-0 top-full z-30 mt-1 w-64 rounded-md border border-runway-border bg-runway-panel p-2 shadow-xl"
+      class="absolute right-0 top-full z-30 mt-1 flex gap-3 rounded-md border border-runway-border bg-runway-panel p-2 shadow-xl"
     >
-      <div class="grid grid-cols-3 gap-1">
+      <!-- Vertical quick presets -->
+      <div class="flex w-16 flex-col gap-0.5">
         <button
           v-for="p in PRESETS"
           :key="p.key"
-          class="rounded px-2 py-1 text-[11px] transition-colors"
+          class="rounded px-2 py-1 text-left text-[11px] transition-colors"
           :class="mode === p.key ? 'bg-sky-600 text-white' : 'text-slate-300 hover:bg-runway-dark'"
           @click="applyPreset(p.key)"
         >
           {{ p.label }}
         </button>
       </div>
-      <div class="mt-2 flex items-center gap-1 border-t border-runway-border pt-2">
+
+      <!-- Precise custom range (date + time), beside the presets -->
+      <div class="flex w-56 flex-col gap-1.5 border-l border-runway-border pl-3">
+        <label class="text-[10px] uppercase tracking-wide text-slate-500">From</label>
         <input
-          type="date"
+          type="datetime-local"
           v-model="customStart"
           :max="customEnd"
-          class="w-28 rounded bg-runway-dark px-1 py-0.5 text-[11px] text-slate-200"
-          @change="applyCustom"
+          class="rounded bg-runway-dark px-1.5 py-1 text-[11px] text-slate-200"
+          @change="customMsg = ''"
         />
-        <span class="text-slate-500">→</span>
+        <label class="text-[10px] uppercase tracking-wide text-slate-500">To</label>
         <input
-          type="date"
+          type="datetime-local"
           v-model="customEnd"
-          :max="todayIso"
-          class="w-28 rounded bg-runway-dark px-1 py-0.5 text-[11px] text-slate-200"
-          @change="applyCustom"
+          :max="todayInput"
+          class="rounded bg-runway-dark px-1.5 py-1 text-[11px] text-slate-200"
+          @change="customMsg = ''"
         />
+        <p v-if="customMsg" class="text-[10px] text-amber-400">{{ customMsg }}</p>
+        <button
+          class="mt-1 rounded bg-sky-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-sky-700"
+          @click="applyCustom"
+        >
+          Apply
+        </button>
       </div>
-      <div class="mt-1 text-[10px] text-slate-500">Custom range max 30 days</div>
     </div>
   </div>
 </template>
