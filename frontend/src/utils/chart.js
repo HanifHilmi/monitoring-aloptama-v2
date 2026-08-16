@@ -348,46 +348,65 @@ export function buildWindRoseOption({ windrose }) {
   }
 }
 
-// Ring gauge: single availability % as a full ring, health-colored arc, and
-// the value centered. Used for per-component availability in the DCP panel.
-export function buildGaugeOption({ value }) {
-  const v = Math.min(100, Math.max(0, value))
-  const color = v >= 99 ? '#10b981' : v >= 95 ? '#fbbf24' : '#ef4444'
+// Ring of gauges: N mini gauges arranged around a circle in ONE chart (like
+// ECharts' "gauge-ring" example). Each gauge is a full ring whose progress
+// arc is health-colored; the value is centered and the component code is
+// labeled below. items = [{ code, name, pct }].
+export function buildGaugeRingOption({ items }) {
+  const N = items.length || 1
+  const R = 29               // ring radius (distance of gauge centers, %)
+  const r = 10               // each gauge radius (%)
+  const nameOf = Object.fromEntries(items.map((it) => [it.code, it.name]))
+  const series = items.map((it, i) => {
+    const phi = ((90 + (i * 360) / N) * Math.PI) / 180   // start at top, clockwise
+    const cx = 50 + R * Math.cos(phi)
+    const cy = 50 - R * Math.sin(phi)
+    const pct = Math.min(100, Math.max(0, it.pct))
+    const color = pct >= 99 ? '#10b981' : pct >= 95 ? '#fbbf24' : '#ef4444'
+    return {
+      type: 'gauge',
+      center: [`${cx.toFixed(2)}%`, `${cy.toFixed(2)}%`],
+      radius: `${r}%`,
+      startAngle: 90,
+      endAngle: -270,
+      min: 0,
+      max: 100,
+      pointer: { show: false },
+      progress: {
+        show: true,
+        overlap: false,
+        roundCap: true,
+        clip: false,
+        itemStyle: { color, width: 5 },
+      },
+      axisLine: { lineStyle: { width: 5, color: [[1, '#1e2a45']] } },
+      axisTick: { show: false },
+      splitLine: { show: false },
+      axisLabel: { show: false },
+      title: { offsetCenter: [0, '80%'], fontSize: 9, color: '#94a3b8' },
+      detail: {
+        offsetCenter: [0, '18%'],
+        fontSize: 10,
+        fontWeight: 700,
+        color,
+        formatter: (v) => `${Number(v).toFixed(1)}%`,
+      },
+      data: [{ value: pct, name: it.code }],
+    }
+  })
   return {
     animation: true,
     animationDuration: 400,
-    series: [
-      {
-        type: 'gauge',
-        startAngle: 90,
-        endAngle: -270,
-        radius: '95%',
-        center: ['50%', '55%'],
-        min: 0,
-        max: 100,
-        pointer: { show: false },
-        progress: {
-          show: true,
-          overlap: false,
-          roundCap: true,
-          clip: false,
-          itemStyle: { color, width: 8 },
-        },
-        axisLine: { lineStyle: { width: 8, color: [[1, '#1e2a45']] } },
-        axisTick: { show: false },
-        splitLine: { show: false },
-        axisLabel: { show: false },
-        detail: {
-          valueAnimation: false,
-          offsetCenter: [0, 0],
-          fontSize: 15,
-          fontWeight: 700,
-          color,
-          formatter: (val) => `${Number(val).toFixed(2)}%`,
-        },
-        data: [{ value: v }],
+    tooltip: {
+      backgroundColor: '#0b1220',
+      borderColor: '#1e2a45',
+      textStyle: { color: '#e2e8f0', fontSize: 11 },
+      formatter: (params) => {
+        const p = Array.isArray(params) ? params[0] : params
+        return `${nameOf[p.name] || p.name}<br/>Availability: <b>${Number(p.value).toFixed(2)}%</b>`
       },
-    ],
+    },
+    series,
   }
 }
 
