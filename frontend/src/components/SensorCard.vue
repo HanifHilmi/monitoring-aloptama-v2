@@ -13,6 +13,7 @@ const props = defineProps({
 
 const metrics = ref({})    // numeric: alias -> [{time, value}]
 const textData = ref({})   // string: alias -> { transitions, counts }
+const availabilityPct = ref(null)  // % of window minutes the sensor had data
 const loading = ref(false)
 const error = ref(null)
 const refreshTick = ref(0)
@@ -82,6 +83,7 @@ async function load() {
     }
     if (Object.keys(td).length) textData.value = td
     if (isAnem.value) wind.value = wide.wind || null
+    availabilityPct.value = wide.availability_pct ?? null
   } catch (e) {
     error.value = e.message
   } finally {
@@ -304,7 +306,7 @@ onBeforeUnmount(() => clearInterval(pollTimer))
         :class="sensor.status === 'ok' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'"
       >
         <span class="inline-block h-1.5 w-1.5 rounded-full" :class="sensor.status === 'ok' ? 'bg-emerald-400' : 'bg-amber-400'" />
-        {{ sensor.status || 'ok' }}
+        {{ sensor.status || 'ok' }}<template v-if="availabilityPct != null"> · {{ availabilityPct }}%</template>
       </span>
     </div>
 

@@ -212,7 +212,7 @@ async def get_wide_telemetry(
     if not cols:
         return {
             "site": site_slug, "metrics": [], "count": 0, "series": {},
-            "textSeries": {}, "textCounts": {}, "wind": None,
+            "textSeries": {}, "textCounts": {}, "wind": None, "availability_pct": None,
             "range": range, "start": s_dt, "end": e_dt, "downsampled": False,
         }
 
@@ -313,6 +313,24 @@ async def get_wide_telemetry(
     if _WIND_COLUMNS.intersection(cols):
         wind = await _compute_wind(db, site_slug, s_dt, e_dt)
 
+    # Data availability: % of minutes in the window where ANY requested
+    # column has a value (the sensor was delivering data). Computed from raw
+    # rows so it is accurate regardless of LTTB downsampling.
+    availability_pct = None
+    if cols:
+        cond = " OR ".join(f"{c} IS NOT NULL" for c in cols)
+        avail = (
+            await db.execute(
+                text(
+                    "SELECT COUNT(*) FILTER (WHERE " + cond + ") FROM awos_metrics "
+                    "WHERE site_id = :slug AND time >= :s AND time <= :e"
+                ),
+                {"slug": site_slug, "s": s_dt, "e": e_dt},
+            )
+        ).scalar_one()
+        total_min = max(1, int(window.total_seconds() // 60))
+        availability_pct = round(min(100.0, (avail or 0) / total_min * 100.0), 1)
+
     return {
         "site": site_slug,
         "metrics": cols,
@@ -321,6 +339,7 @@ async def get_wide_telemetry(
         "textSeries": text_series,
         "textCounts": text_counts,
         "wind": wind,
+        "availability_pct": availability_pct,
         "range": range,
         "start": s_dt,
         "end": e_dt,
