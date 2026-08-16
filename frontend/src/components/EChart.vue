@@ -30,7 +30,11 @@ let observer = null
 
 function render() {
   if (!chart) return
-  chart.setOption({ timezone: 'UTC', ...props.option }, { notMerge: false })
+  // ECharts renders time axes in the DEVICE timezone by default. `useUTC:
+  // true` is the option the library actually reads (5.6 reads useUTC, not
+  // timezone) and forces UTC wall-clock labels/tooltips regardless of the
+  // visitor's timezone. Must be present in the first setOption.
+  chart.setOption({ useUTC: true, timezone: 'UTC', ...props.option }, { notMerge: false })
 }
 
 function resize() {
