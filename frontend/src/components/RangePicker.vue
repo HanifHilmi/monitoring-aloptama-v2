@@ -1,5 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import TimeStepper from '@/components/TimeStepper.vue'
+import { useRecentRanges } from '@/composables/useRecentRanges'
 import { PRESETS, presetWindow, combineUtc, MAX_RANGE_MS } from '@/utils/range'
 
 const props = defineProps({
@@ -32,6 +34,9 @@ const calYear = ref(new Date().getUTCFullYear())
 const calMonth = ref(new Date().getUTCMonth())
 const selStart = ref('')
 const selEnd = ref('')
+
+// Recent custom ranges (persisted history, click to re-apply).
+const { ranges, add } = useRecentRanges()
 
 const label = computed(() => {
   if (mode.value === 'custom') return 'Custom'
@@ -67,18 +72,20 @@ function applyPreset(key) {
   open.value = false
 }
 
-function syncCustom() {
+// Apply the custom range: validate, clamp to MAX_MS, emit, save to Recent,
+// and close. This is the only place a custom range triggers a data load.
+function applyCustom() {
   const s = combineUtc(customStartDate.value, customStartTime.value)
   const e = combineUtc(customEndDate.value, customEndTime.value)
   if (!s || !e) {
     customMsg.value = 'Select both a From and To time.'
-    return false
+    return
   }
   const sMs = s.getTime()
   let eMs = e.getTime()
   if (eMs <= sMs) {
     customMsg.value = 'To must be after From.'
-    return false
+    return
   }
   if (eMs - sMs > MAX_MS) {
     eMs = sMs + MAX_MS
@@ -88,13 +95,27 @@ function syncCustom() {
   } else {
     customMsg.value = ''
   }
-  emit('update:modelValue', {
-    key: 'custom',
+  const entry = {
     start: new Date(sMs).toISOString(),
     end: new Date(eMs).toISOString(),
-  })
+  }
+  entry.label = `${entry.start.slice(0, 10)} ${entry.start.slice(11, 16)} → ${entry.end.slice(0, 10)} ${entry.end.slice(11, 16)}`
+  emit('update:modelValue', { key: 'custom', start: entry.start, end: entry.end })
+  add(entry)
   mode.value = 'custom'
-  return true
+  open.value = false
+}
+
+// Re-apply a range from the Recent list (loads immediately).
+function applyRecent(r) {
+  customStartDate.value = r.start.slice(0, 10)
+  customStartTime.value = r.start.slice(11, 16)
+  customEndDate.value = r.end.slice(0, 10)
+  customEndTime.value = r.end.slice(11, 16)
+  emit('update:modelValue', { key: 'custom', start: r.start, end: r.end })
+  mode.value = 'custom'
+  customMsg.value = ''
+  open.value = false
 }
 
 // ---- Shared calendar range picker ----
@@ -133,6 +154,8 @@ function isInSel(d) {
   return dateStr >= (s < e ? s : e) && dateStr <= (s < e ? e : s)
 }
 
+// Picking From then To fills the date fields and closes the calendar. The
+// data does NOT load here — the operator reviews times and hits Apply Range.
 function pickCalDay(d) {
   const dateStr = `${calYear.value}-${pad(calMonth.value + 1)}-${pad(d)}`
   if (!selStart.value || (selStart.value && selEnd.value)) {
@@ -143,17 +166,12 @@ function pickCalDay(d) {
   let s = selStart.value
   let e = dateStr
   if (e < s) { const t = s; s = e; e = t }
-  const eMs = Date.parse(`${e}T00:00:00Z`)
-  if (eMs - Date.parse(`${s}T00:00:00Z`) > MAX_MS) {
-    e = new Date(Date.parse(`${s}T00:00:00Z`) + MAX_MS).toISOString().slice(0, 10)
-    customMsg.value = 'Range capped to 31 days.'
-  }
   selStart.value = s
   selEnd.value = e
   customStartDate.value = s
   customEndDate.value = e
   calMode.value = false
-  if (syncCustom()) open.value = false
+  customMsg.value = ''
 }
 
 watch(() => props.modelValue, (v) => initFromModel(v), { deep: true })
@@ -194,43 +212,63 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMouseDown))
         </button>
       </div>
 
-      <!-- Custom range: date+time (24h) with a shared calendar range popover -->
-      <div class="flex w-60 flex-col gap-1.5 border-l border-runway-border pl-3">
+      <!-- Custom range: 24h steppers + shared calendar + Apply + Recent -->
+      <div class="flex w-64 flex-col gap-1.5 border-l border-runway-border pl-3">
         <template v-if="!calMode">
           <label class="text-[10px] uppercase tracking-wide text-slate-500">From</label>
           <div class="flex items-center gap-1">
             <button
               class="shrink-0 rounded bg-runway-dark px-1.5 py-1 text-[11px] text-slate-300 hover:bg-runway-border"
-              title="Pick range"
+              title="Pick From date"
               @click="openCalendar"
             >📅</button>
-            <span class="flex-1 rounded bg-runway-dark px-1.5 py-1 font-mono text-[11px] text-slate-200">{{ customStartDate }}</span>
-            <input
-              type="time"
-              v-model="customStartTime"
-              @change="syncCustom"
-              class="w-[4.6rem] rounded bg-runway-dark px-1 py-1 text-[11px] text-slate-200"
-            />
+            <button
+              class="flex-1 rounded bg-runway-dark px-1.5 py-1 text-left font-mono text-[11px] text-slate-200 transition-colors hover:bg-runway-border"
+              title="Pick From date"
+              @click="openCalendar"
+            >{{ customStartDate }}</button>
+            <TimeStepper v-model="customStartTime" />
           </div>
+
           <label class="text-[10px] uppercase tracking-wide text-slate-500">To</label>
           <div class="flex items-center gap-1">
             <button
               class="shrink-0 rounded bg-runway-dark px-1.5 py-1 text-[11px] text-slate-300 hover:bg-runway-border"
-              title="Pick range"
+              title="Pick To date"
               @click="openCalendar"
             >📅</button>
-            <span class="flex-1 rounded bg-runway-dark px-1.5 py-1 font-mono text-[11px] text-slate-200">{{ customEndDate }}</span>
-            <input
-              type="time"
-              v-model="customEndTime"
-              @change="syncCustom"
-              class="w-[4.6rem] rounded bg-runway-dark px-1 py-1 text-[11px] text-slate-200"
-            />
+            <button
+              class="flex-1 rounded bg-runway-dark px-1.5 py-1 text-left font-mono text-[11px] text-slate-200 transition-colors hover:bg-runway-border"
+              title="Pick To date"
+              @click="openCalendar"
+            >{{ customEndDate }}</button>
+            <TimeStepper v-model="customEndTime" />
           </div>
+
           <p v-if="customMsg" class="text-[10px] text-amber-400">{{ customMsg }}</p>
+
+          <button
+            class="mt-1 rounded bg-sky-600 px-3 py-1.5 text-[11px] font-semibold text-white transition-colors hover:bg-sky-700"
+            @click="applyCustom"
+          >
+            Apply Range
+          </button>
+
+          <!-- Recent custom ranges (click to re-apply immediately) -->
+          <div v-if="ranges.length" class="mt-1.5 border-t border-runway-border pt-1.5">
+            <div class="mb-1 text-[10px] uppercase tracking-wide text-slate-500">Recent</div>
+            <div class="flex flex-col gap-0.5">
+              <button
+                v-for="r in ranges"
+                :key="r.label"
+                class="rounded bg-runway-dark px-1.5 py-1 text-left font-mono text-[10px] text-slate-300 transition-colors hover:bg-runway-border"
+                @click="applyRecent(r)"
+              >{{ r.label }}</button>
+            </div>
+          </div>
         </template>
 
-        <!-- Shared calendar: pick From then To, applies immediately -->
+        <!-- Shared calendar: pick From then To (loads only on Apply) -->
         <template v-else>
           <div class="flex items-center justify-between">
             <button class="px-1 text-slate-400 hover:text-white" @click="navCal(-1)">‹</button>
@@ -255,8 +293,9 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMouseDown))
               @click="pickCalDay(d)"
             >{{ d }}</button>
           </div>
-          <div class="mt-1 border-t border-runway-border pt-1 text-[10px] text-slate-500">
-            Pick From then To (max 31 days)
+          <div class="mt-1 flex items-center justify-between border-t border-runway-border pt-1 text-[10px] text-slate-500">
+            <span>Pick From then To (max 31 days)</span>
+            <button class="text-sky-400 hover:text-white" @click="calMode = false">← Back</button>
           </div>
         </template>
       </div>
