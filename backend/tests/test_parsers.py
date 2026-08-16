@@ -92,3 +92,34 @@ def test_coerce_value() -> None:
     assert coerce_value("///") is None
     assert coerce_value("MMMM") is None
     assert coerce_value("D") is None  # string day/night flag
+
+
+def test_coerce_value_variable_slash_runs() -> None:
+    # The offline representation is a run of '/' matching the field width:
+    # '/', '//', '///', '/////', 29 slashes ... all must be NULL.
+    assert coerce_value("/") is None
+    assert coerce_value("//") is None
+    assert coerce_value("///") is None
+    assert coerce_value("/////") is None
+    assert coerce_value("/" * 29) is None
+
+
+def test_offline_text_fields_are_invalid(tmp_path) -> None:
+    # Offline text fields (SKY with 29 slashes, D/N with a single slash) must
+    # be flagged invalid (stored NULL) while healthy fields stay valid.
+    from tests.conftest import WIDN_HEADER, _padded_row
+
+    path = tmp_path / "091OneMinute.20260101.dat"
+    row = _padded_row({
+        0: "091", 4: "20260101", 13: "00", 16: "00",
+        79: "253", 84: "235", 89: " 90",   # ATRH 04 healthy
+        166: "/",                            # D/N 04 offline
+        228: "/" * 29,                       # SKY 04 offline
+    })
+    path.write_text(WIDN_HEADER + row, encoding="utf-8")
+
+    recs = parse_one_minute_file(path, specs())
+    by = {(m.sensor_code, m.metric): m for m in recs[0].metrics}
+    assert by[("CEL", "SKY")].is_valid is False
+    assert by[("RVR", "D/N")].is_valid is False
+    assert by[("ATRH", "TEMP")].is_valid is True

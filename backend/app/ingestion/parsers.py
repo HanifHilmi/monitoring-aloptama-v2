@@ -22,8 +22,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-# Explicit missing tokens => sensor OFFLINE => SQL NULL at write time.
-MISSING = {"///", "//", "MM", "M", "N/A", "---"}
+# An offline field is filled with a run of '/' characters — one per character
+# of the data slice (e.g. '/', '///', '/////', 29 slashes). Match any run.
+_SLASH_RUN = re.compile(r"/+")
+
+
+def _is_missing(token: str) -> bool:
+    """True when the token is a non-empty run of '/' (sensor OFFLINE)."""
+    return bool(token) and _SLASH_RUN.fullmatch(token) is not None
 
 LINE_PAD = 350
 
@@ -51,7 +57,7 @@ def coerce_value(raw: str) -> Optional[float]:
     # numeric 0 (text handled by the caller via text_value '').
     if not token:
         return 0.0
-    if token in MISSING:
+    if _is_missing(token):
         return None
     clean = token.replace(",", ".")
     try:
@@ -147,7 +153,7 @@ def parse_one_minute_file(path, sensor_specs, default_ts=None) -> list[ParsedRec
                 # Numeric: valid when not explicit-missing (empty -> 0 healthy).
                 # Text: valid when a non-missing token exists; empty stays ''.
                 if is_text:
-                    valid = token not in MISSING
+                    valid = not _is_missing(token)
                 else:
                     valid = val is not None
                 rec.metrics.append(
