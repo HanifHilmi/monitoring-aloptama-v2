@@ -341,7 +341,7 @@ async def get_wide_telemetry(
             )
         ).scalar_one()
         total_min = max(1, int(window.total_seconds() // 60))
-        availability_pct = round(min(100.0, (avail or 0) / total_min * 100.0), 1)
+        availability_pct = round(min(100.0, (avail or 0) / total_min * 100.0), 4)
 
     return {
         "site": site_slug,

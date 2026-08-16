@@ -306,7 +306,7 @@ onBeforeUnmount(() => clearInterval(pollTimer))
         :class="sensor.status === 'ok' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'"
       >
         <span class="inline-block h-1.5 w-1.5 rounded-full" :class="sensor.status === 'ok' ? 'bg-emerald-400' : 'bg-amber-400'" />
-        {{ sensor.status || 'ok' }}<template v-if="availabilityPct != null"> · {{ availabilityPct }}%</template>
+        {{ sensor.status || 'ok' }}<template v-if="availabilityPct != null"> · {{ availabilityPct.toFixed(2) }}%</template>
       </span>
     </div>
 
