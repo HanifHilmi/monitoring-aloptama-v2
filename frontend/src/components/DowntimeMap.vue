@@ -70,13 +70,13 @@ function buildOption() {
   const calendarBase = {
     left: 36,
     right: 12,
-    cellSize: ['auto', 10],
+    cellSize: ['auto', 6],
     range: [startDate, endDate],
     splitLine: { lineStyle: { color: '#1e293b' } },
     itemStyle: { color: '#0b1220', borderWidth: 0 },
     yearLabel: { show: false },
-    dayLabel: { color: '#94a3b8', fontSize: 8, height: 10 },
-    monthLabel: { color: '#64748b', fontSize: 9 },
+    dayLabel: { color: '#94a3b8', fontSize: 8, height: 8 },
+    monthLabel: { color: '#64748b', fontSize: 8 },
   }
 
   return {
@@ -109,8 +109,8 @@ function buildOption() {
       ],
     },
     calendar: [
-      { ...calendarBase, top: 34, bottom: '50%' },
-      { ...calendarBase, top: '52%', bottom: 26 },
+      { ...calendarBase, top: 34, bottom: '51%' },
+      { ...calendarBase, top: '53%', bottom: 26 },
     ],
     series: [
       {
@@ -190,7 +190,7 @@ onBeforeUnmount(() => clearInterval(timer))
     <div v-else-if="!cdps.length" class="py-12 text-center text-xs text-slate-500">No CDP nodes</div>
     <!-- ONE card: CDP1 (top half) + CDP2 (bottom half), shared piecewise legend -->
     <div v-else class="panel">
-      <EChart :option="option" height="340px" />
+      <EChart :option="option" height="360px" />
     </div>
   </div>
 </template>
