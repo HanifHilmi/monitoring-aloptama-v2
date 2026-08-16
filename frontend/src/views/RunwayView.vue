@@ -163,32 +163,31 @@ onUnmounted(() => clearInterval(timer.value))
           </div>
 
           <!-- Average over the 7 components -->
-          <div class="mt-4 flex items-baseline gap-3">
+          <div class="mt-3 flex items-baseline gap-3">
             <span class="text-xs uppercase tracking-wide text-slate-500">Sites - Data Availability</span>
-            <span class="text-3xl font-bold" :class="pctClass(dcpAvg)">
+            <span class="text-2xl font-bold" :class="pctClass(dcpAvg)">
               {{ dcpAvg == null ? '—' : dcpAvg.toFixed(2) + '%' }}
             </span>
           </div>
 
-          <div class="mt-4 grid gap-6 lg:grid-cols-2">
-            <!-- Combined ring gauge (one chart, 7 nested component rings) -->
+          <div class="mt-3 grid gap-4 lg:grid-cols-2">
             <!-- Per-component availability bars -->
-            <div class="flex flex-col gap-2">
-              <div v-for="c in dcpComponents" :key="c.code" class="flex items-center gap-2 text-xs">
-                <span class="w-28 shrink-0 truncate text-slate-400" :title="c.name">{{ c.name }}</span>
-                <div class="h-2 flex-1 overflow-hidden rounded-full bg-runway-dark">
+            <div class="flex flex-col gap-1.5">
+              <div v-for="c in dcpComponents" :key="c.code" class="flex items-center gap-1.5 text-xs">
+                <span class="w-24 shrink-0 truncate text-slate-400" :title="c.name">{{ c.name }}</span>
+                <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-runway-dark">
                   <div class="h-full rounded-full transition-all" :class="barColor(c.pct)" :style="{ width: Math.min(100, c.pct) + '%' }"></div>
                 </div>
-                <span class="w-14 shrink-0 text-right font-mono" :class="pctClass(c.pct)">{{ c.pct.toFixed(2) }}%</span>
+                <span class="w-12 shrink-0 text-right font-mono" :class="pctClass(c.pct)">{{ c.pct.toFixed(2) }}%</span>
               </div>
-              <div v-if="!dcpComponents.length" class="py-6 text-center text-xs text-slate-500">Loading DCP availability…</div>
+              <div v-if="!dcpComponents.length" class="py-4 text-center text-xs text-slate-500">Loading DCP availability…</div>
             </div>
 
             <!-- Total data missing chart -->
-            <div class="rounded bg-runway-dark p-2">
+            <div class="rounded bg-runway-dark p-1.5">
               <div class="mb-1 text-[10px] uppercase tracking-wide text-slate-500">Total Data Missing</div>
-              <EChart v-if="missingOption" :option="missingOption" height="220px" />
-              <div v-else class="flex h-[220px] items-center justify-center text-xs text-slate-500">No data</div>
+              <EChart v-if="missingOption" :option="missingOption" height="140px" />
+              <div v-else class="flex h-[140px] items-center justify-center text-xs text-slate-500">No data</div>
             </div>
           </div>
         </div>

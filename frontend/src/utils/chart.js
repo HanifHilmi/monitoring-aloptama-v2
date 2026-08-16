@@ -357,7 +357,7 @@ export function buildTotalMissingOption({ items }) {
   return {
     animation: true,
     animationDuration: 400,
-    grid: { left: 8, right: 16, top: 24, bottom: 0, containLabel: true },
+    grid: { left: 8, right: 16, top: 12, bottom: 0, containLabel: true },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
@@ -374,13 +374,13 @@ export function buildTotalMissingOption({ items }) {
       data: labels,
       axisLine: { lineStyle: { color: AXIS_COLOR } },
       axisTick: { show: false },
-      axisLabel: { color: AXIS_COLOR, fontSize: 10, rotate: 30 },
+      axisLabel: { color: AXIS_COLOR, fontSize: 9, rotate: 30 },
       splitLine: { show: false },
     },
     yAxis: {
       type: 'value',
       minInterval: 1,
-      axisLabel: { color: AXIS_COLOR, fontSize: 10 },
+      axisLabel: { color: AXIS_COLOR, fontSize: 9 },
       splitLine: { lineStyle: { color: SPLIT_COLOR } },
     },
     series: [
