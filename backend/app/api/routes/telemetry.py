@@ -52,6 +52,13 @@ WIDE_ALIAS = {
 # awos_metrics columns that hold TEXT values (categorical, not numeric).
 _TEXT_COLUMNS = {"als_dn", "sky_condition", "present_weather", "lightning"}
 
+# Event/text columns that are BLANK when the sensor is ONLINE ('' = no
+# event) — they never go NULL except via '///', so counting them would mask
+# real outages (e.g. Present Weather was always ~100% while RA was offline).
+# sky_condition and als_dn are value-always and stay as availability
+# indicators.
+_EVENT_TEXT_COLUMNS = {"present_weather", "lightning"}
+
 # Columns used for the wind summary (wind rose + gust stats).
 _WIND_COLUMNS = {"wind_speed_kt", "wind_dir_deg", "gust_speed_kt", "gust_dir_deg"}
 
@@ -313,12 +320,17 @@ async def get_wide_telemetry(
     if _WIND_COLUMNS.intersection(cols):
         wind = await _compute_wind(db, site_slug, s_dt, e_dt)
 
-    # Data availability: % of minutes in the window where ANY requested
-    # column has a value (the sensor was delivering data). Computed from raw
-    # rows so it is accurate regardless of LTTB downsampling.
+    # Data availability: % of minutes in the window where the sensor was
+    # delivering data. Blank-when-online event texts (present_weather,
+    # lightning) are excluded so they can't mask real outages; if every
+    # requested column is such an event text (e.g. Lightning), fall back to
+    # them so the sensor still reports an availability figure.
     availability_pct = None
-    if cols:
-        cond = " OR ".join(f"{c} IS NOT NULL" for c in cols)
+    avail_cols = [c for c in cols if c not in _EVENT_TEXT_COLUMNS]
+    if not avail_cols:
+        avail_cols = cols
+    if avail_cols:
+        cond = " OR ".join(f"{c} IS NOT NULL" for c in avail_cols)
         avail = (
             await db.execute(
                 text(
