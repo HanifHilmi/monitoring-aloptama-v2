@@ -7,7 +7,7 @@ import PeriodPicker from '@/components/PeriodPicker.vue'
 import RangePicker from '@/components/RangePicker.vue'
 import SensorCard from '@/components/SensorCard.vue'
 import { currentPeriod } from '@/utils/period'
-import { buildTotalMissingOption } from '@/utils/chart'
+import { buildGaugeOption, buildTotalMissingOption } from '@/utils/chart'
 
 const props = defineProps({
   siteSlug: { type: String, required: true },
@@ -61,6 +61,14 @@ const dcpAvg = computed(() =>
   dcpSummary.value ? dcpSummary.value.data_availability_pct : null,
 )
 
+const dcpGauges = computed(() =>
+  dcpComponents.value.map((c) => ({
+    code: c.code,
+    name: c.name,
+    option: buildGaugeOption({ value: c.pct }),
+  })),
+)
+
 const missingOption = computed(() => {
   if (!dcpComponents.value.length) return null
   return buildTotalMissingOption({
@@ -82,11 +90,6 @@ function pctClass(p) {
   if (p >= 99) return 'text-emerald-400'
   if (p >= 95) return 'text-amber-400'
   return 'text-red-400'
-}
-function barColor(p) {
-  if (p >= 99) return 'bg-emerald-400'
-  if (p >= 95) return 'bg-amber-400'
-  return 'bg-red-400'
 }
 
 async function loadOverview() {
@@ -171,16 +174,15 @@ onUnmounted(() => clearInterval(timer.value))
           </div>
 
           <div class="mt-4 grid gap-6 lg:grid-cols-2">
-            <!-- Per-component availability bars -->
-            <div class="flex flex-col gap-2">
-              <div v-for="c in dcpComponents" :key="c.code" class="flex items-center gap-2 text-xs">
-                <span class="w-28 shrink-0 truncate text-slate-400" :title="c.name">{{ c.name }}</span>
-                <div class="h-2 flex-1 overflow-hidden rounded-full bg-runway-dark">
-                  <div class="h-full rounded-full transition-all" :class="barColor(c.pct)" :style="{ width: Math.min(100, c.pct) + '%' }"></div>
+            <!-- Per-component availability ring gauges -->
+            <div>
+              <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                <div v-for="g in dcpGauges" :key="g.code" class="flex flex-col items-center">
+                  <EChart :option="g.option" height="110px" />
+                  <span class="mt-1 text-[11px] text-slate-400" :title="g.name">{{ g.name }}</span>
                 </div>
-                <span class="w-14 shrink-0 text-right font-mono" :class="pctClass(c.pct)">{{ c.pct.toFixed(2) }}%</span>
               </div>
-              <div v-if="!dcpComponents.length" class="py-6 text-center text-xs text-slate-500">Loading DCP availability…</div>
+              <div v-if="!dcpGauges.length" class="py-6 text-center text-xs text-slate-500">Loading DCP availability…</div>
             </div>
 
             <!-- Total data missing chart -->

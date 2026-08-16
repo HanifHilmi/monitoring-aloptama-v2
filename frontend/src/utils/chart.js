@@ -348,6 +348,49 @@ export function buildWindRoseOption({ windrose }) {
   }
 }
 
+// Ring gauge: single availability % as a full ring, health-colored arc, and
+// the value centered. Used for per-component availability in the DCP panel.
+export function buildGaugeOption({ value }) {
+  const v = Math.min(100, Math.max(0, value))
+  const color = v >= 99 ? '#10b981' : v >= 95 ? '#fbbf24' : '#ef4444'
+  return {
+    animation: true,
+    animationDuration: 400,
+    series: [
+      {
+        type: 'gauge',
+        startAngle: 90,
+        endAngle: -270,
+        radius: '95%',
+        center: ['50%', '55%'],
+        min: 0,
+        max: 100,
+        pointer: { show: false },
+        progress: {
+          show: true,
+          overlap: false,
+          roundCap: true,
+          clip: false,
+          itemStyle: { color, width: 8 },
+        },
+        axisLine: { lineStyle: { width: 8, color: [[1, '#1e2a45']] } },
+        axisTick: { show: false },
+        splitLine: { show: false },
+        axisLabel: { show: false },
+        detail: {
+          valueAnimation: false,
+          offsetCenter: [0, 0],
+          fontSize: 15,
+          fontWeight: 700,
+          color,
+          formatter: (val) => `${Number(val).toFixed(2)}%`,
+        },
+        data: [{ value: v }],
+      },
+    ],
+  }
+}
+
 // DCP section: minutes each component was missing data in the period.
 // items = [{ label, missing }]. Bars are color-coded by severity so the
 // problem reads at a glance (dark = none, amber = some, red = a lot).
