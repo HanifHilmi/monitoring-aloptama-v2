@@ -124,6 +124,10 @@ function pickCurrent() {
   monthIdx.value = nowMonth
   quarterIdx.value = Math.floor(nowMonth / 3)
   day.value = nowDay
+  // Clear any manual weekly selection so the week label/calendar fall back
+  // to the current week instead of showing the previously picked range.
+  selStart.value = null
+  selEnd.value = null
   if (category.value === 'yearly') broadcast(yearSoFar(nowYear))
   else if (category.value === 'monthly') broadcast(monthSoFar(nowYear, nowMonth))
   else if (category.value === 'quarterly') broadcast(quarterSoFar(nowYear, Math.floor(nowMonth / 3)))
