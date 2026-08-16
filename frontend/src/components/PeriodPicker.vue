@@ -218,7 +218,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMouseDown))
         {{ year }} ▾
       </button>
       <div v-if="openFor === 'year'"
-        class="absolute left-0 top-full z-30 mt-1 w-32 rounded-md border border-runway-border bg-runway-panel p-2 shadow-xl">
+        class="absolute right-0 top-full z-30 mt-1 w-32 rounded-md border border-runway-border bg-runway-panel p-2 shadow-xl">
         <div class="mb-1 flex items-center justify-between">
           <button class="px-1 text-slate-400 hover:text-white" @click="navYearPage(-1)">‹</button>
           <span class="text-xs font-semibold text-slate-200">{{ yearPageStart }}–{{ Math.min(yearPageStart + 7, YEAR_MAX) }}</span>
@@ -245,7 +245,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMouseDown))
         {{ MONTHS[monthIdx].slice(0, 3) }} ▾
       </button>
       <div v-if="openFor === 'monthly'"
-        class="absolute left-0 top-full z-30 mt-1 w-44 rounded-md border border-runway-border bg-runway-panel p-2 shadow-xl">
+        class="absolute right-0 top-full z-30 mt-1 w-44 rounded-md border border-runway-border bg-runway-panel p-2 shadow-xl">
         <div class="mb-1 flex items-center justify-between">
           <button class="px-1 text-slate-400 hover:text-white" @click="navPopYear(-1)">‹</button>
           <span class="text-xs font-semibold text-slate-200">{{ year }}</span>
@@ -272,7 +272,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMouseDown))
         {{ QUARTERS[quarterIdx] }} ▾
       </button>
       <div v-if="openFor === 'quarterly'"
-        class="absolute left-0 top-full z-30 mt-1 w-40 rounded-md border border-runway-border bg-runway-panel p-2 shadow-xl">
+        class="absolute right-0 top-full z-30 mt-1 w-40 rounded-md border border-runway-border bg-runway-panel p-2 shadow-xl">
         <div class="mb-1 flex items-center justify-between">
           <button class="px-1 text-slate-400 hover:text-white" @click="navPopYear(-1)">‹</button>
           <span class="text-xs font-semibold text-slate-200">{{ year }}</span>
@@ -299,7 +299,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMouseDown))
         {{ weekLabel }} ▾
       </button>
       <div v-if="openFor === 'weekly'"
-        class="absolute left-0 top-full z-30 mt-1 w-56 rounded-md border border-runway-border bg-runway-panel p-2 shadow-xl">
+        class="absolute right-0 top-full z-30 mt-1 w-56 rounded-md border border-runway-border bg-runway-panel p-2 shadow-xl">
         <div class="mb-1 flex items-center justify-between">
           <button class="px-1 text-slate-400 hover:text-white" @click="navMonth(-1)">‹</button>
           <span class="text-xs font-semibold text-slate-200">{{ MONTHS[monthIdx].slice(0, 3) }} {{ year }}</span>
