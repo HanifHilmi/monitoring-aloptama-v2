@@ -7,7 +7,7 @@ import PeriodPicker from '@/components/PeriodPicker.vue'
 import RangePicker from '@/components/RangePicker.vue'
 import SensorCard from '@/components/SensorCard.vue'
 import { currentPeriod } from '@/utils/period'
-import { buildGaugeRingOption, buildTotalMissingOption } from '@/utils/chart'
+import { buildGaugeOption, buildTotalMissingOption } from '@/utils/chart'
 
 const props = defineProps({
   siteSlug: { type: String, required: true },
@@ -61,12 +61,13 @@ const dcpAvg = computed(() =>
   dcpSummary.value ? dcpSummary.value.data_availability_pct : null,
 )
 
-const dcpRingOption = computed(() => {
-  if (!dcpComponents.value.length) return null
-  return buildGaugeRingOption({
-    items: dcpComponents.value.map((c) => ({ code: c.code, name: c.name, pct: c.pct })),
-  })
-})
+const dcpGauges = computed(() =>
+  dcpComponents.value.map((c) => ({
+    code: c.code,
+    name: c.name,
+    option: buildGaugeOption({ value: c.pct }),
+  })),
+)
 
 const missingOption = computed(() => {
   if (!dcpComponents.value.length) return null
@@ -173,10 +174,15 @@ onUnmounted(() => clearInterval(timer.value))
           </div>
 
           <div class="mt-4 grid gap-6 lg:grid-cols-2">
-            <!-- Combined ring of 7 component gauges (single chart) -->
-            <div class="rounded bg-runway-dark p-2">
-              <EChart v-if="dcpRingOption" :option="dcpRingOption" height="280px" />
-              <div v-if="!dcpRingOption" class="flex h-[280px] items-center justify-center text-xs text-slate-500">Loading DCP availability…</div>
+            <!-- Per-component availability ring gauges -->
+            <div>
+              <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                <div v-for="g in dcpGauges" :key="g.code" class="flex flex-col items-center">
+                  <EChart :option="g.option" height="110px" />
+                  <span class="mt-1 text-[11px] text-slate-400" :title="g.name">{{ g.name }}</span>
+                </div>
+              </div>
+              <div v-if="!dcpGauges.length" class="py-6 text-center text-xs text-slate-500">Loading DCP availability…</div>
             </div>
 
             <!-- Total data missing chart -->
