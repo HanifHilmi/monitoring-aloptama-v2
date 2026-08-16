@@ -348,6 +348,54 @@ export function buildWindRoseOption({ windrose }) {
   }
 }
 
+// DCP section: minutes each component was missing data in the period.
+// items = [{ label, missing }]. Bars are color-coded by severity so the
+// problem reads at a glance (dark = none, amber = some, red = a lot).
+export function buildTotalMissingOption({ items }) {
+  const labels = items.map((i) => i.label)
+  const colorFor = (m) => (m <= 0 ? '#1e2a45' : m < 60 ? '#fbbf24' : '#ef4444')
+  return {
+    animation: true,
+    animationDuration: 400,
+    grid: { left: 8, right: 16, top: 24, bottom: 0, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      backgroundColor: '#0b1220',
+      borderColor: '#1e2a45',
+      textStyle: { color: '#e2e8f0', fontSize: 11 },
+      formatter: (params) => {
+        const p = Array.isArray(params) ? params[0] : params
+        return `${p.name}<br/>Missing: <b>${p.value}</b> min`
+      },
+    },
+    xAxis: {
+      type: 'category',
+      data: labels,
+      axisLine: { lineStyle: { color: AXIS_COLOR } },
+      axisTick: { show: false },
+      axisLabel: { color: AXIS_COLOR, fontSize: 10, rotate: 30 },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: 'value',
+      minInterval: 1,
+      axisLabel: { color: AXIS_COLOR, fontSize: 10 },
+      splitLine: { lineStyle: { color: SPLIT_COLOR } },
+    },
+    series: [
+      {
+        type: 'bar',
+        barWidth: '55%',
+        data: items.map((i) => ({
+          value: i.missing,
+          itemStyle: { color: colorFor(i.missing), borderRadius: [3, 3, 0, 0] },
+        })),
+      },
+    ],
+  }
+}
+
 // Histogram of minutes-per-value for high-cardinality string data (weather
 // codes, cloud layers, lightning). Top 8 values + "other".
 export function buildStringHistogramOption({ counts, name = '' }) {
