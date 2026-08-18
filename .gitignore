@@ -44,3 +44,12 @@ logs/
 data/
 pgdata/
 volumes/
+.aider*
+
+# Agentic tools
+.agents/
+.orca/
+.clinerules
+AGENTS.md
+opencode.json
+skills-lock.json
