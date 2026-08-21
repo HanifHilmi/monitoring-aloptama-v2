@@ -22,8 +22,8 @@ A self-hosted, high-performance monitoring platform for an **AWOS CAT. III** (Au
 │  Ingestion Worker     │   │  PostgreSQL + TimescaleDB (latest-pg16)   │
 │  Active-passive CDP   │   │  - cdp_nodes, sites, sensors (master)     │
 │  reader (failover)    │──▶│  - awos_metrics (wide hypertable)         │
-│  watermark ingestion  │   │  - downtime_events (state machine)        │
-│  1-min shared 091 file│   │  - daily_sla_ola (pre-aggregated)         │
+│  watermark ingestion  │   │  - cdp_connectivity (SLA samples)         │
+│  1-min shared 091 file│   │  SLA/OLA computed live (COUNT FILTER)     │
 └───────────────────────┘   └───────────────────────────────────────────┘
 ```
 
@@ -33,8 +33,7 @@ A self-hosted, high-performance monitoring platform for an **AWOS CAT. III** (Au
   - PK `(time, site_id)` → idempotent `ON CONFLICT (time, site_id) DO UPDATE`.
   - Timescale hypertable with **columnar compression grouped by `site_id`** (segmentby) + compression/retention policies.
 - **`cdp_connectivity`** — per-node reachability for SLA.
-- **`downtime_events`** — state-machine records (`start_time`, `end_time`, `duration_seconds`), SLA keyed by `cdp_id`, OLA keyed by `(site_id, component_code)`.
-- **`daily_sla_ola`** — pre-aggregated rollups for sub-200ms dashboard queries.
+- SLA/OLA percentages are **computed live** via `COUNT(*) FILTER` aggregates over `awos_metrics` / `cdp_connectivity`. The former `downtime_events` state machine and `daily_sla_ola` rollups were removed (migration `013_remove_rollup_and_events.sql`).
 
 ### Data-saving contract
 - Explicit missing tokens (`///`, `//`, `M`, `MM`, `N/A`, `---`) → **SQL NULL** (sensor OFFLINE).
@@ -50,12 +49,12 @@ Uptime % = ((Total Seconds − Downtime Seconds) / Total Seconds) × 100%
 ```
 
 ## Data sources
-| Node  | IP              | Mount path        |
-|-------|-----------------|-------------------|
-| CDP 1 | `172.70.55.162` | `/mnt/cdp1_logs/` |
-| CDP 2 | `172.70.55.163` | `/mnt/cdp2_logs/` |
+| Node  | IP env var | Mount path        |
+|-------|------------|-------------------|
+| CDP 1 | `CDP1_IP`  | `/mnt/cdp1_logs/` |
+| CDP 2 | `CDP2_IP`  | `/mnt/cdp2_logs/` |
 
-Log layout (shared `091` file, read once for both CDP + DCP): `oneminute/*.dat` primary, `sensor/*` raw-DCP fallback (exact character-position slicing). Failover: if a day's file isn't on CDP 1, the reader falls back to CDP 2.
+Log layout (shared `091` file, read once for both CDP + DCP): `oneminute/*.dat` primary, `sensor/*` raw-DCP fallback (exact character-position slicing). Failover: nodes are probed every cycle (ICMP ping first, TCP-connect fallback); if the active node becomes unreachable, the healthiest passive node is promoted to active.
 
 ## Site sensor matrix (7 per site)
 | Runway 04       | Runway 22       | Runway Middle    |
@@ -70,7 +69,7 @@ Log layout (shared `091` file, read once for both CDP + DCP): `oneminute/*.dat` 
 
 ## Env & roles (single toggle: `ENVIRONMENT`)
 - **Backend (API)** — serves endpoints, runs **migrations** at boot, and runs the **Backfill All** job in-process.
-- **Worker** — continuous **live ingestion** (watermark/frontier) of the latest minutes + daily rollups. It never migrates or backfills on boot.
+- **Worker** — continuous **live ingestion** (watermark/frontier) of the latest minutes. It never migrates or backfills on boot.
 - `ENVIRONMENT=dev` → schema is dropped/recreated on boot (fresh). Any other value (default `production`) → **never** resets. Migrations always run (idempotent `IF NOT EXISTS`). No `RESET_DB_ON_BOOT` / `ENABLE_BACKFILL_ON_BOOT` / `ENABLE_MIGRATIONS_ON_BOOT` flags.
 
 ## Quick start (Docker)
@@ -97,12 +96,11 @@ cd frontend && npm install && npm run dev
 ## API surface (v1)
 | Method | Path                                   | Description                                  |
 |--------|----------------------------------------|----------------------------------------------|
-| GET    | `/api/v1/health`                        | Liveness / DB connectivity                   |
+| GET    | `/health`                              | Liveness probe (Coolify/Docker healthcheck)  |
 | GET    | `/api/v1/status/overview`               | CDP + per-component status                   |
 | GET    | `/api/v1/telemetry/{site}`              | Wide awos_metrics window (LTTB optional)     |
 | GET    | `/api/v1/sla-ola/summary`               | SLA + OLA (per-site & 21-component)          |
 | GET    | `/api/v1/sla-ola/history`               | Daily SLA/OLA history                        |
-| GET    | `/api/v1/sla-ola/events`                | Downtime events                              |
 | GET    | `/api/v1/sla-ola/downtime-map`          | Yearly downtime heatmap                      |
 | POST   | `/api/v1/backfill/all/start`            | Start combined CDP+DCP backfill job          |
 | GET    | `/api/v1/backfill/job/{id}/stream`      | SSE progress / resume (survives refresh)     |

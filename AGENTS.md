@@ -16,7 +16,7 @@
 - When using sub-agents to implement features, act as a coordinator only
 - When implementing large features, act as a coordinator and delegate parallel tasks (e.g., backend API vs. Vue components) to sub-agents.
 - Use the best model for the task: premium models for complex Python/FastAPI/Vue coding, mid-tier models for documentation or minor scripts.
-- Never modify production database volume paths directly — strictly use the host bind-mount (`/data/monitoring-aloptama/db`) specified in `docker-compose.yml`.
+- Never modify production database volume paths directly — strictly use the host bind-mount configured via `PG_DATA_DIR` in `docker-compose.yml` (default `/var/lib/monitoring-aloptama-pg`).
 - After completing features (large or small), ALWAYS run verification commands (`pytest` on backend, `npm run build` on frontend).
 
 ## GIT & DEPLOYMENT WORKFLOW
@@ -30,7 +30,7 @@
 ## DATABASE SCHEMA CHANGES
 
 - Whenever database schema changes are required, ALWAYS create a new sequentially numbered `.sql` file in `backend/migrations/` (e.g., `013_new_feature_schema.sql`).
-- NEVER edit or mutate existing migration files (`001_initial_schema.sql` through `012_drop_telemetry.sql`) that have already been executed.
+- NEVER edit or mutate existing migration files (`001_initial_schema.sql` through `014_fix_text_slash_nulls.sql`) that have already been executed.
 - NEVER run destructive `DROP TABLE` or `RESET_DB_ON_BOOT=true` scripts on production environments.
 
 ## TESTING
@@ -42,7 +42,7 @@
 ## UI DESIGN & COMPONENT SYSTEM
 
 - Follow the existing Vue 3 (Composition API) + Tailwind CSS + Apache ECharts design patterns.
-- Maintain styling consistency across key views (`DashboardView.vue`, `RunwayView.vue`, `SlaOlaView.vue`, `SystemView.vue`).
+- Maintain styling consistency across key views (`DashboardView.vue` [hosts SLA/OLA], `RunwayView.vue`, `SystemView.vue`).
 
 ## INSTALLED SKILLS & MCP TOOLS
 
