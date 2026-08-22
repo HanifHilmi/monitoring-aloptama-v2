@@ -47,9 +47,11 @@ volumes/
 .aider*
 
 # Agentic tools
-.agents/
-.orca/
+.vscode/
+.agents/*
+orca.yaml
 .clinerules
 AGENTS.md
 opencode.json
 skills-lock.json
+
